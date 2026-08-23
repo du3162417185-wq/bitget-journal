@@ -1,4 +1,4 @@
-/* 西西弗斯 | 交易日记 — 前端渲染（纯静态，读取 data/data.json） */
+/* Successful西西弗斯 | 交易日记 — 前端渲染（纯静态，读取 data/data.json） */
 'use strict';
 
 const $ = (s, el = document) => el.querySelector(s);
