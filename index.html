@@ -33,6 +33,7 @@
     <button data-tab="closes">平仓历史</button>
     <button data-tab="fills">成交明细</button>
     <button data-tab="orders">历史委托</button>
+    <button data-tab="transfers">充提记录</button>
     <button data-tab="about">关于本站</button>
   </div>
 </nav>
@@ -45,7 +46,7 @@
 
     <div class="grid2">
       <div class="card chart-card">
-        <div class="card-title">累计净盈亏曲线（近90天平仓，含手续费与资金费）</div>
+        <div class="card-title">累计净盈亏曲线（2026年2月至今，含手续费与资金费）</div>
         <div id="curveChart" class="chart"></div>
       </div>
       <div class="card chart-card">
@@ -97,7 +98,7 @@
     <div class="card">
       <div class="card-head">
         <div class="card-title">历史平仓盈亏 <span class="count" id="closesCount"></span>
-          <span class="note">Bitget API 保留约 90 天记录</span></div>
+          <span class="note">2026年2月起全量留档 · 经典账户记录已导入</span></div>
         <div class="tools"><input id="closesFilter" class="search" placeholder="筛选币种…">
         <button class="csv" data-csv="closes">导出 CSV</button></div>
       </div>
@@ -129,6 +130,18 @@
     </div>
   </section>
 
+  <!-- 充提记录 -->
+  <section id="tab-transfers" class="panel">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">充提记录 <span class="count" id="transfersCount"></span>
+          <span class="note">来自 Bitget 官方导出 · 链上交易 ID 可自行验证</span></div>
+        <button class="csv" data-csv="transfers">导出 CSV</button>
+      </div>
+      <div class="table-wrap"><table id="transfersTable"></table></div>
+    </div>
+  </section>
+
   <!-- 关于 -->
   <section id="tab-about" class="panel">
     <div class="card prose">
@@ -148,9 +161,10 @@
 
       <h3>ℹ️ 说明</h3>
       <ul>
-        <li>平仓历史：Bitget API 保留约 90 天记录，本站自 <b>2026-08-23</b> 起持续同步留痕；</li>
+        <li>历史范围：<b>2026 年 2 月至今全量记录</b>——2026 年 8 月前为经典账户，由 Bitget 官方导出文件导入；此后由 API 每 20 分钟自动同步并<b>永久归档</b>（API 仅返回近 90 天，但本站归档不会丢失任何老记录）；</li>
+        <li>平仓历史中的「导入」「归集」标记：导入 = 经典账户导出文件；归集 = 由成交明细中的平仓盈亏自动汇总（两段数据的衔接处）；</li>
         <li>净盈亏 = 毛盈亏 − 手续费 ± 资金费，口径与交易所一致；</li>
-        <li>页面仅统计 <b>Bitget 统一账户</b>（含 USDT 本位合约与现货），券商部分不在此列。</li>
+        <li>充提记录公开链上交易 ID，可验证<b>无外部注资</b>；页面仅统计 <b>Bitget 账户</b>（合约 + 现货），券商部分不在此列。</li>
       </ul>
 
       <h3>⚠️ 风险提示</h3>

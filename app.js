@@ -48,9 +48,9 @@ function renderOverview() {
   const cards = [
     { k: '账户总权益（USDT）', v: fmt(eq), hint: c ? `≈ ¥${fmt(c, 0)} · 1U≈7.2¥估算` : '', hi: true },
     { k: '未实现盈亏', v: pnl(stats.unrealisedPnl ?? NaN), cls: cls(stats.unrealisedPnl), hint: '当前持仓浮动' },
-    { k: '净已实现盈亏（近90天）', v: pnl(stats.realizedPnl), cls: cls(stats.realizedPnl), hint: `平仓 ${stats.closesCount} 笔 · 含费用` },
+    { k: '净已实现盈亏（全程）', v: pnl(stats.realizedPnl), cls: cls(stats.realizedPnl), hint: `2026年2月起 ${stats.closesCount} 笔平仓 · 含费用` },
     { k: '胜率', v: stats.winRate == null ? '–' : stats.winRate + '%', hint: '按净盈亏计' },
-    { k: '累计手续费', v: fmt(stats.fees), hint: '全部成交（近90天）' },
+    { k: '累计手续费', v: fmt(stats.fees), hint: '全部留档成交（USDT 计价）' },
     { k: '资金费收支', v: pnl(stats.funding), cls: cls(stats.funding), hint: '已平仓位合计' },
   ];
   $('#cards').innerHTML = cards.map((x) => `
@@ -170,7 +170,7 @@ function renderPositions() {
       </tr>`).join('') + '</tbody>'
     : '';
 
-  const assets = d.accountAssets?.assets || [];
+  const assets = [...(d.accountAssets?.assets || [])].sort((a, b) => Number(b.usdValue || 0) - Number(a.usdValue || 0));
   $('#assetsTable').innerHTML = assets.length
     ? `<thead><tr><th>币种</th><th>权益</th><th>≈价值(USD)</th><th>可用</th><th>锁定</th></tr></thead><tbody>` +
       assets.map((a) => `<tr>
@@ -202,9 +202,11 @@ function renderCloses() {
   const head = `<thead><tr><th>平仓时间</th><th>币种</th><th>方向</th><th>数量</th><th>开仓均价</th><th>平仓均价</th><th>毛盈亏</th><th>手续费</th><th>资金费</th><th>净盈亏</th><th>开仓时间</th></tr></thead>`;
   const rows = list.map((p) => {
     const fee = -(Number(p.openFeeTotal || 0) + Number(p.closeFeeTotal || 0));
+    const srcTag = p.importSource === 'csv' ? '<span class="tag">导入</span>'
+      : p.importSource === 'gap-synth' ? '<span class="tag">归集</span>' : '';
     return `<tr>
       <td>${t(p.updatedTime)}</td>
-      <td><b>${esc(sym(p.symbol))}</b></td>
+      <td><b>${esc(sym(p.symbol))}</b>${srcTag}</td>
       <td class="${p.posSide === 'long' ? 'pos' : 'neg'}">${SIDE[p.posSide] || '–'}</td>
       <td class="num">${fmt(p.closeTotalPos, 3)}</td>
       <td class="num">${fmt(p.openPriceAvg, p.openPriceAvg > 100 ? 2 : 4)}</td>
@@ -226,7 +228,9 @@ function renderFills() {
   $('#fillsCount').textContent = `(${list.length})`;
   const head = `<thead><tr><th>时间</th><th>币种</th><th>类别</th><th>方向</th><th>成交价</th><th>数量</th><th>成交额</th><th>手续费</th><th>平仓盈亏</th></tr></thead>`;
   const rows = list.map((f) => {
-    const fee = Array.isArray(f.feeDetail) ? f.feeDetail.reduce((s, x) => s + Number(x.fee || 0), 0) : 0;
+    const fee = Array.isArray(f.feeDetail)
+      ? f.feeDetail.reduce((s, x) => s + Number(x.fee || 0), 0)
+      : Number(f.fee || 0);
     const spot = f.category === 'SPOT';
     return `<tr>
       <td>${t(f.createdTime)}</td>
@@ -264,6 +268,27 @@ function renderOrders() {
   $('#ordersTable').innerHTML = head + `<tbody>${rows || '<tr><td colspan="10" class="empty">无匹配记录</td></tr>'}</tbody>`;
 }
 
+/* ---------- 充提记录 ---------- */
+function renderTransfers() {
+  const list = [...(state.data.transfers || [])].sort((a, b) => Number(b.time) - Number(a.time));
+  $('#transfersCount').textContent = `(${list.length})`;
+  const head = `<thead><tr><th>时间</th><th>类型</th><th>账户</th><th>币种</th><th>数量</th><th>状态</th><th>交易ID</th></tr></thead>`;
+  const rows = list.map((x) => {
+    const isWithdraw = /withdraw/i.test(x.type);
+    const tx = x.txid ? `<a href="https://etherscan.io/tx/${esc(x.txid)}" target="_blank" rel="noopener" title="${esc(x.txid)}">${esc(x.txid.slice(0, 10))}…</a>` : '–';
+    return `<tr>
+      <td>${t(x.time)}</td>
+      <td class="${isWithdraw ? 'neg' : 'pos'}">${isWithdraw ? '提现' : '充值'}</td>
+      <td class="dim">${esc(x.account || '')}</td>
+      <td><b>${esc(x.coin)}</b></td>
+      <td class="num">${fmt(x.amount, 4)}</td>
+      <td class="dim">${esc(x.status || '')}</td>
+      <td class="num">${tx}</td>
+    </tr>`;
+  }).join('');
+  $('#transfersTable').innerHTML = head + `<tbody>${rows || '<tr><td colspan="7" class="empty">暂无记录</td></tr>'}</tbody>`;
+}
+
 /* ---------- CSV 导出 ---------- */
 function exportCSV(kind) {
   let rows = [];
@@ -276,12 +301,15 @@ function exportCSV(kind) {
   } else if (kind === 'fills') {
     rows = [['时间', '币种', '类别', '方向', '成交价', '数量', '成交额', '手续费', '平仓盈亏']]
       .concat(state.fills.map((f) => {
-        const fee = Array.isArray(f.feeDetail) ? f.feeDetail.reduce((s, x) => s + Number(x.fee || 0), 0) : 0;
+        const fee = Array.isArray(f.feeDetail) ? f.feeDetail.reduce((s, x) => s + Number(x.fee || 0), 0) : Number(f.fee || 0);
         return [tFull(f.createdTime), f.symbol, f.category, TRADE_SIDE[f.tradeSide] || f.side, f.execPrice, f.execQty, f.execValue, fee, f.execPnl];
       }));
   } else if (kind === 'orders') {
     rows = [['时间', '币种', '方向', '类型', '委托价', '委托量', '成交量', '成交均价', '状态']]
       .concat(state.orders.map((o) => [tFull(o.createdTime), o.symbol, o.side, o.orderType, o.price, o.qty, o.cumExecQty, o.avgPrice, ORDER_STATUS[o.orderStatus] || o.orderStatus]));
+  } else if (kind === 'transfers') {
+    rows = [['时间', '类型', '账户', '币种', '数量', '状态', '交易ID']]
+      .concat((state.data.transfers || []).map((x) => [tFull(x.time), x.type, x.account, x.coin, x.amount, x.status, x.txid]));
   }
   const csv = '\ufeff' + rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
   const a = document.createElement('a');
@@ -300,6 +328,7 @@ function renderAll() {
   renderCloses();
   renderFills();
   renderOrders();
+  renderTransfers();
 }
 
 /* ---------- 事件 ---------- */
