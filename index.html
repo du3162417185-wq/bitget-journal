@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>西西弗斯 | 交易日记 · Bitget 实盘同步</title>
+<meta name="description" content="Bitget 统一账户只读 API 实盘同步：总权益、当前持仓、历史平仓盈亏、成交明细与历史委托。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪨</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="brand">
+      <span class="logo">🪨</span>
+      <div>
+        <h1>西西弗斯 · 交易日记</h1>
+        <div class="sub">三年之约：2.7w → 100w（2026–2029）· 每笔平仓，如实记录</div>
+      </div>
+    </div>
+    <div class="sync-badge" title="数据全部来自 Bitget 官方只读 API，自动同步，非手工填写">
+      <span class="dot"></span> Bitget 只读 API 自动同步
+      <span class="sync-time">更新于 <b id="syncTime">–</b></span>
+    </div>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <div class="wrap">
+    <button data-tab="overview" class="active">总览</button>
+    <button data-tab="positions">当前持仓</button>
+    <button data-tab="closes">平仓历史</button>
+    <button data-tab="fills">成交明细</button>
+    <button data-tab="orders">历史委托</button>
+    <button data-tab="about">关于本站</button>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- 总览 -->
+  <section id="tab-overview" class="panel active">
+    <div class="cards" id="cards"></div>
+
+    <div class="grid2">
+      <div class="card chart-card">
+        <div class="card-title">累计净盈亏曲线（近90天平仓，含手续费与资金费）</div>
+        <div id="curveChart" class="chart"></div>
+      </div>
+      <div class="card chart-card">
+        <div class="card-title">每日净盈亏（UTC+8）</div>
+        <div id="dailyChart" class="chart"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">最近平仓</div>
+        <a class="more" href="#" data-goto="closes">查看全部 →</a>
+      </div>
+      <div class="table-wrap"><table id="recentCloses"></table></div>
+    </div>
+  </section>
+
+  <!-- 当前持仓 -->
+  <section id="tab-positions" class="panel">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">当前持仓 <span class="count" id="posCount"></span></div>
+        <button class="csv" data-csv="positions">导出 CSV</button>
+      </div>
+      <div class="table-wrap"><table id="positionsTable"></table></div>
+      <div class="empty" id="posEmpty" hidden>当前空仓 —— 推石头的间隙，也是修行。</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="card-title">当前挂单 <span class="count" id="ooCount"></span></div></div>
+      <div class="table-wrap"><table id="openOrdersTable"></table></div>
+      <div class="empty" id="ooEmpty" hidden>暂无挂单</div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">统一账户资产明细</div>
+        <div class="table-wrap"><table id="assetsTable"></table></div>
+      </div>
+      <div class="card">
+        <div class="card-title">资金账户（现货/理财）</div>
+        <div class="table-wrap"><table id="fundingTable"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 平仓历史 -->
+  <section id="tab-closes" class="panel">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">历史平仓盈亏 <span class="count" id="closesCount"></span>
+          <span class="note">Bitget API 保留约 90 天记录</span></div>
+        <div class="tools"><input id="closesFilter" class="search" placeholder="筛选币种…">
+        <button class="csv" data-csv="closes">导出 CSV</button></div>
+      </div>
+      <div class="table-wrap"><table id="closesTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 成交明细 -->
+  <section id="tab-fills" class="panel">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">成交明细 <span class="count" id="fillsCount"></span></div>
+        <div class="tools"><input id="fillsFilter" class="search" placeholder="筛选币种…">
+        <button class="csv" data-csv="fills">导出 CSV</button></div>
+      </div>
+      <div class="table-wrap"><table id="fillsTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 历史委托 -->
+  <section id="tab-orders" class="panel">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">历史委托 <span class="count" id="ordersCount"></span></div>
+        <div class="tools"><input id="ordersFilter" class="search" placeholder="筛选币种…">
+        <button class="csv" data-csv="orders">导出 CSV</button></div>
+      </div>
+      <div class="table-wrap"><table id="ordersTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 关于 -->
+  <section id="tab-about" class="panel">
+    <div class="card prose">
+      <h3>📌 这是什么</h3>
+      <p>我是 <b>西西弗斯</b>（X：<a href="https://x.com/XiaoHan_aw" target="_blank" rel="noopener">@XiaoHan_aw</a>）。
+      2026 年 4 月，我的本金只有 1 万元；如今交易所 + 券商本金共 2.7 万。我给自己立了一个三年之约：
+      借助比特币四年周期的确定性，在 2029 年前把 2.7 万滚到 100 万。</p>
+      <p>这个页面就是契约本身——<b>每一笔交易，无论盈亏，都会如实出现在这里</b>。我会一步一步滚动自己的石头，直至到达山顶。</p>
+
+      <h3>🔒 数据如何保证真实</h3>
+      <ul>
+        <li>全部数据通过 <b>Bitget 官方 API（统一交易账户 v3）</b>自动抓取，<b>非手工填写</b>；</li>
+        <li>API 密钥为<b>只读权限</b>——无交易、无提现权限，仅能查询；</li>
+        <li>数据由程序定时同步，每次变动都在 GitHub 仓库留有提交记录，可追溯、无法悄悄篡改；</li>
+        <li>页面上的每一个数字，都可以对照 Bitget App 核验。</li>
+      </ul>
+
+      <h3>ℹ️ 说明</h3>
+      <ul>
+        <li>平仓历史：Bitget API 保留约 90 天记录，本站自 <b>2026-08-23</b> 起持续同步留痕；</li>
+        <li>净盈亏 = 毛盈亏 − 手续费 ± 资金费，口径与交易所一致；</li>
+        <li>页面仅统计 <b>Bitget 统一账户</b>（含 USDT 本位合约与现货），券商部分不在此列。</li>
+      </ul>
+
+      <h3>⚠️ 风险提示</h3>
+      <p>本页面仅为个人交易记录与自我约束之用，<b>不构成任何投资建议</b>。合约杠杆风险极高，请对自己的每一笔决策负责。</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    🪨 西西弗斯 | 交易日记 · 由 Bitget 只读 API 驱动 · 数据更新与修改全程留痕
+    <div class="foot-links">
+      <a href="https://x.com/XiaoHan_aw" target="_blank" rel="noopener">X @XiaoHan_aw</a>
+      <a id="repoLink" href="#" target="_blank" rel="noopener" hidden>数据仓库（GitHub）</a>
+    </div>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
