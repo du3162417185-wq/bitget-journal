@@ -7,7 +7,8 @@
 
 ```
 index.html / app.js / style.css   网站（纯静态，无任何外部依赖）
-scripts/fetch.mjs                 同步脚本（Node ≥18，读取 .env 或环境变量）
+scripts/fetch.mjs                 同步脚本（Node ≥18，读取 .env 或环境变量；归档合并制：API 90 天窗口外的老记录永久留存）
+scripts/import-history.mjs        一次性：导入经典账户官方导出文件（CSV/XLS）→ data/import-history.json
 data/data.json                    每次同步生成的数据（被网站读取、随仓库提交留痕）
 data/equity-history.json          长期净值曲线快照（逐次追加）
 sync-and-push.bat                 Windows 本地手动/定时同步并推送
