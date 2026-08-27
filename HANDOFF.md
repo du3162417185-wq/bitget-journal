@@ -1,6 +1,6 @@
 # 项目交接文档 — Successful西西弗斯 | 交易日记（Bitget 实盘同步站）
 
-> 最后更新：2026-08-24。本文档面向接手维护的 AI/开发者，覆盖全部架构、文件位置、凭据位置、已知坑与运维手册。
+> 最后更新：2026-08-27。本文档面向接手维护的 AI/开发者，覆盖全部架构、文件位置、凭据位置、已知坑与运维手册。
 
 ## 1. 项目是什么
 
@@ -21,9 +21,13 @@ Bitget 统一账户 v3 只读 API →（GitHub Actions 每 20 分钟）`scripts/
 │ index.html / app.js / style.css      网站前端（纯静态、零依赖、深色主题） │
 │ scripts/fetch.mjs                    同步+归档合并脚本（Node ≥18，唯一依赖 undici）│
 │ scripts/import-history.mjs           一次性工具：导入经典账户官方导出文件 │
+│ scripts/review-server.mjs            本机作者复盘服务（同步→保存→提交→推送）│
+│ scripts/verify.mjs                   不联网、不改数据的静态自检 │
 │ data/data.json                       全量数据（网站唯一数据源，也是归档本体）│
 │ data/equity-history.json             权益快照，逐次追加（长期净值曲线） │
 │ data/import-history.json             经典账户导入数据（静态，2026-02~07）│
+│ data/reviews.json                    作者复盘（平仓唯一键→正文/时间）│
+│ admin.html / 点评.bat                本机复盘编辑器与双击入口 │
 │ .env                                 密钥（被 .gitignore 排除，绝不入库）│
 │ sync-and-push.bat                    Windows 本地手动同步+推送 │
 │ .github/workflows/sync.yml           每 20 分钟：抓取→合并→提交→部署 Pages │
@@ -32,6 +36,14 @@ Bitget 统一账户 v3 只读 API →（GitHub Actions 每 20 分钟）`scripts/
 ```
 
 前端标签页：总览（指标卡+累计盈亏曲线+每日盈亏柱图）/ 当前持仓 / 平仓历史 / 成交明细 / 历史委托 / 充提记录 / 关于本站。表格可筛选、可导出 CSV。前端每 5 分钟带 `?t=` 缓存穿透参数自动刷新数据。
+
+### 2.1 作者复盘数据流
+
+双击 `点评.bat` → `review-server.mjs` 仅监听 `127.0.0.1:8931` → 启动及保存前先同步远端 `main` → `admin.html` 选择平仓并编辑 → 校验复盘 key 确实对应最新平仓 → 只写 `data/reviews.json` → commit + push → `deploy.yml` 发布。访客主站并行读取 `data.json` 与 `reviews.json`，只显示复盘，无写接口。
+
+复盘唯一键与归档平仓键完全相同：`symbol|posSide|floor(updatedTime/1000)`。当前 88 笔平仓无键冲突；`npm run verify` 会持续检查重复键、孤儿复盘、空正文和遗留测试文案。
+
+本机工具的保护规则：必须位于 `main`、工作区必须干净；pull/rebase、网络或 push 任一步失败都会明确停止。不要恢复旧版“吞掉 pull 错误继续 push”的逻辑。`admin.html`、脚本和本地工具不会打入 Pages artifact。
 
 ## 3. 密钥（只读，无资金风险）
 
@@ -88,6 +100,7 @@ git -c http.proxy=http://127.0.0.1:7897 push
 
 - 仓库级 git 身份已配置（user.name=xixifusi）；全局没配，命令行临时身份不再需要。
 - 直接 push 会触发 `deploy.yml` 部署；定时同步的提交由 `sync.yml` 自己部署——因为 **GITHUB_TOKEN 的 push 不会触发其他工作流**（防递归设计），所以 sync.yml 里内置了 Pages 部署步骤。
+- 两个工作流都会先整理 `_site`，仅发布前端、JSON 数据和四份说明文档；不会把 `admin.html`、本机脚本、node_modules 或其他开发文件发布到 Pages。
 - Pages 已启用 build_type=workflow；`configure-pages` 带 `enablement: true`。
 - Pages CDN 对 data.json 缓存约 10 分钟；前端用 `?t=时间戳` 穿透，无需处理。
 - 手动触发同步：`gh workflow run sync.yml -R du3162417185-wq/bitget-journal`（gh 命令需 `export https_proxy=http://127.0.0.1:7897`）。
@@ -98,14 +111,16 @@ git -c http.proxy=http://127.0.0.1:7897 push
 |---|---|
 | 本地看效果 | `cd /d/bitget-journal && python -m http.server 8923 --bind 127.0.0.1` → http://127.0.0.1:8923 |
 | 本地手动同步 | `npm run sync`（.env 里已配代理）或双击 `sync-and-push.bat` |
+| 写/改作者复盘 | 保证工作区干净且在 main → 双击 `点评.bat` → 选择平仓 → 保存并推送 |
+| 上线前静态自检 | `npm run verify`（不联网、不修改数据） |
 | 改页面文案/样式 | 改 index.html/app.js/style.css → 按第 7 节推送 |
 | 导入新历史文件 | 见第 6 节 |
 | 查工作流状态 | `gh run list -R du3162417185-wq/bitget-journal --limit 5` |
 | 国内打不开 | 已知问题（github.io 被墙）。预案：迁 Cloudflare Pages——repo 接入 CF Pages（build 无命令、输出根目录），定时同步改为 CF Workers Cron 或仍用 GitHub Actions push（CF 自动部署）；域名换成 pages.dev |
 
-## 9. 当前数据基线（2026-08-24）
+## 9. 当前数据基线（2026-08-27 15:46）
 
-平仓 88 笔（CSV 导入 54 / API 27 / 归集 7），全量净已实现盈亏 **+1,801.03 USDT**，胜率 56.8%，手续费 149.88，资金费 −166.33，成交 2,053 笔，委托 582 笔，充提 20 笔（含链上 txid，证明无外部注资），首笔平仓 2026-02-12，权益约 3,668 USDT（≈2.6万，另有券商仓位不在本站范围）。
+平仓 88 笔（CSV 导入 54 / API 27 / 归集 7），全量净已实现盈亏 **+1,801.03 USDT**，胜率 56.8%，手续费 152.75，资金费 −166.33，成交 2,117 笔，委托 608 笔，充提 20 笔（含链上 txid，证明无外部注资），首笔平仓 2026-02-12，权益约 3,667.09 USDT（另有券商仓位不在本站范围）。
 
 ## 10. 环境清单
 

@@ -9,16 +9,20 @@
 
 ```
 D:\bitget-journal\
-├─ index.html            网页骨架（唯一的页面）
+├─ index.html            公开网页骨架
 ├─ style.css             全部样式（深色主题）
 ├─ app.js                全部前端逻辑（渲染/图表/筛选/导出）
+├─ admin.html            本机作者复盘编辑器（不部署到 Pages）
 ├─ data\
 │  ├─ data.json          ★ 全量数据 + 归档本体（网站唯一数据源）
 │  ├─ equity-history.json  权益快照序列（净值曲线原料，追加式）
-│  └─ import-history.json  经典账户导入数据（静态，由脚本生成）
+│  ├─ import-history.json  经典账户导入数据（静态，由脚本生成）
+│  └─ reviews.json       作者复盘（平仓唯一键 → 正文/时间）
 ├─ scripts\
 │  ├─ fetch.mjs          同步脚本：API 抓取 + 归档合并 + 统计（Actions 每 20 分钟跑）
-│  └─ import-history.mjs 导入工具：解析 5 个官方导出文件 → import-history.json
+│  ├─ import-history.mjs 导入工具：解析 5 个官方导出文件 → import-history.json
+│  ├─ review-server.mjs  本机复盘服务：同步→校验→保存→commit→push
+│  └─ verify.mjs         项目静态自检（不联网、不改数据）
 ├─ .github\workflows\
 │  ├─ sync.yml           定时同步+部署（核心自动化）
 │  └─ deploy.yml         手动改页面时的部署
@@ -26,6 +30,7 @@ D:\bitget-journal\
 ├─ .gitignore            排除 .env / node_modules
 ├─ .gitattributes        统一 LF 换行
 ├─ sync-and-push.bat     Windows 双击手动同步
+├─ 点评.bat              Windows 双击打开作者复盘编辑器
 ├─ package.json          Node 依赖声明（仅 undici）
 ├─ README.md             项目简介 + 部署说明
 ├─ HANDOFF.md            交接总档
@@ -47,9 +52,10 @@ D:\bitget-journal\
 - 头部横幅：站名 h1、副标题（"三年之约：2.7w → 100w（2026–2029）…"）、绿色"只读 API 自动同步"徽章 + 更新时间（id=`syncTime`）。
 - 顶部粘性导航（id=`tabs`）：7 个按钮 `data-tab` = overview / positions / closes / fills / orders / transfers / about，对应 7 个 `<section class="panel">`。
 - 关键 DOM id（app.js 全靠这些挂载）：
-  - 总览：`cards`、`curveChart`、`dailyChart`、`recentCloses`
+  - 总览：`cards`、`curveChart`、`dailyChart`、`recentCloses`、`curveTabs`、`dailyTabs`
   - 持仓页：`positionsTable`、`openOrdersTable`、`assetsTable`、`fundingTable`、`posCount`、`ooCount`、`posEmpty`、`ooEmpty`
   - 其他页：`closesTable/closesCount/closesFilter`、`fillsTable/fillsCount/fillsFilter`、`ordersTable/ordersCount/ordersFilter`、`transfersTable/transfersCount`
+  - 复盘弹层：`reviewModal`、`rvSym`、`rvMeta`、`rvBody`、`rvClose`
   - 页脚：`repoLink`（配合 `window.REPO_URL` 可开）
 - 想改文案（如汇率提示、关于页故事）：直接改 HTML 里对应文字。
 
@@ -59,13 +65,16 @@ D:\bitget-journal\
 - 响应式断点 760px（双栏图表并一栏）；表格在窄屏横向滚动。
 
 ### app.js —— 逻辑
-- 入口 `load()`：`fetch('data/data.json?t='+Date.now())`（缓存穿透）→ `prepare()`（合并排序）→ `renderAll()`；每 5 分钟自动重跑。
+- 入口 `load()`：并行读取 `data/data.json` 与 `data/reviews.json`（都带时间戳穿透缓存）→ `prepare()`（合并排序）→ `renderAll()`；每 5 分钟自动重跑。
 - 渲染函数：
-  - `renderOverview()`：6 张指标卡 + `lineChart()`（累计盈亏 SVG 折线）+ `barChart()`（每日盈亏柱）+ 最近 10 笔平仓
+  - `renderOverview()`：6 张指标卡；净已实现盈亏支持近 30/60/90 天和交易至今切换
+  - `renderCharts()`：累计盈亏 SVG 折线 + 每日盈亏柱；两个图联动切换区间，折线按所选区间重新从 0 累计，支持指针悬浮/触摸提示和 5 个时间刻度
+  - `renderRecentCloses()`：最近 10 笔平仓，含开仓时间与作者复盘入口
   - `renderPositions()`：当前持仓表（杠杆/标记价/强平价/收益率）+ 挂单表 + **统一账户资产表（按 USD 降序）** + 资金账户表
   - `renderCloses()/renderFills()/renderOrders()/renderTransfers()`：四个历史表，支持币种筛选（输入框 input 事件重渲染）
 - 汉化映射：`SIDE`（long→多）、`TRADE_SIDE`（open_long→开多…）、`ORDER_STATUS`（filled→已成交…）。
 - `exportCSV(kind)`：当前表导出带 BOM 的 CSV（Excel 中文不乱码）。
+- `rvKey()/openReview()/rvBadge()`：按平仓唯一键关联公开复盘，弹层正文先 HTML 转义再保留换行；平仓 CSV 也附复盘列。
 - 数字与时间：千分位、红绿着色、时间全部按 `Asia/Shanghai` 显示。
 
 ---
@@ -96,6 +105,10 @@ D:\bitget-journal\
 
 **stats 字段**：usdtEquity、unrealisedPnl、realizedPnl(全量净已实现)、closesCount、winRate(净盈亏>0 占比)、fees(仅 USDT 计价)、funding(已平仓位资金费合计)、curve[{t,cum}]、daily[{d,pnl}]、firstCloseAt。
 
+### data/reviews.json
+
+顶层对象的 key 为 `symbol|posSide|floor(updatedTime/1000)`，与 `fetch.mjs` 的 `posKey` 相同。value 为 `{text, time, symbol}`：正文最多 5000 字，time 是作者保存时的毫秒时间戳。空对象 `{}` 表示尚无公开复盘。禁止手工制造找不到平仓记录的 key；`npm run verify` 会检查孤儿记录和重复平仓键。
+
 ---
 
 ## 四、脚本详解
@@ -121,15 +134,21 @@ D:\bitget-journal\
 ### sync-and-push.bat
 读 .env → `npm run sync` → 有变化则 git commit（时间戳消息）+ push（走系统代理）。
 
+### scripts/review-server.mjs + admin.html + 点评.bat
+双击批处理后，本机服务只监听 `127.0.0.1:8931`。启动及保存前都要求当前在 `main`、工作区干净，并先 `pull --rebase` 获取最新交易；保存时复核 key、只暂存 `data/reviews.json`、提交并推送。若保存期间恰逢定时同步造成 non-fast-forward，会同步后重试一次；rebase 失败会自动 abort 并明确报错。编辑器支持全部平仓搜索、未保存切换提醒、删除确认和手动同步按钮。
+
+### scripts/verify.mjs
+读取现有 JSON 与前端源文件，检查归档结构、平仓键唯一性、复盘关联/长度/时间、遗留测试复盘及关键 DOM/渲染入口。只读运行：`npm run verify`。
+
 ---
 
 ## 五、GitHub Actions 工作流逐步说明
 
 ### sync.yml（每 20 分钟，cron `*/20 * * * *`）
-checkout → 装 Node 20 → `npm ci` → `node scripts/fetch.mjs`（密钥来自 Secrets；服务器直连 Bitget，无代理）→ `git add data`，有变化才 commit+push → **同一工作流内**继续：configure-pages(enablement) → upload-pages-artifact → deploy-pages。（为什么部署也在这：GITHUB_TOKEN 的 push 不会触发其他工作流，防止数据更新不发布。）
+checkout → 装 Node 20 → `npm ci` → `node scripts/fetch.mjs`（密钥来自 Secrets；服务器直连 Bitget，无代理）→ `git add data`，有变化才 commit+push → **同一工作流内**继续：configure-pages(enablement) → 整理 `_site` 公开目录 → upload-pages-artifact → deploy-pages。（为什么部署也在这：GITHUB_TOKEN 的 push 不会触发其他工作流，防止数据更新不发布。）
 
 ### deploy.yml（手动 push 触发）
-监听 main 分支的 index.html/app.js/style.css/data/** 变化 → 同样的 Pages 部署三步。
+main 分支任何 push 都触发 → 整理 `_site` → 发布 Pages。`_site` 只含公开前端、`data/*.json` 与 README/HANDOFF/DEVLOG/FILES；本机编辑器和开发脚本不会部署。
 
 ---
 
@@ -144,6 +163,8 @@ checkout → 装 Node 20 → `npm ci` → `node scripts/fetch.mjs`（密钥来�
 | 改同步频率 | sync.yml 的 cron（注意是 UTC 时间） |
 | 加/改标签页 | index.html 加 button+section，app.js 加渲染函数 |
 | 导入新导出文件 | import-history.mjs 的 FILES → 重跑 → 推送 |
+| 写/修改作者复盘 | 保证 main 工作区干净 → 双击 点评.bat |
+| 项目静态自检 | `npm run verify` |
 | 改"关于本站"叙述 | index.html 的 tab-about 段落 |
 
 改完任何前端文件：`git add -A && git commit -m "..."` → `git -c http.proxy=http://127.0.0.1:7897 pull --rebase -X ours origin main` → `git -c http.proxy=http://127.0.0.1:7897 push`，1~2 分钟后线上生效。

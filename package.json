@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Bitget 只读 API 实盘交易日记（静态站 + 定时同步）",
   "scripts": {
-    "sync": "node scripts/fetch.mjs"
+    "sync": "node scripts/fetch.mjs",
+    "verify": "node scripts/verify.mjs"
   },
   "engines": {
     "node": ">=18"

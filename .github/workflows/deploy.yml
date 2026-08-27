@@ -23,8 +23,15 @@ jobs:
       - uses: actions/configure-pages@v5
         with:
           enablement: true
+      - name: 整理公开站点
+        shell: bash
+        run: |
+          mkdir -p _site/data
+          cp index.html app.js style.css _site/
+          cp data/*.json _site/data/
+          cp README.md HANDOFF.md DEVLOG.md FILES.md _site/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
