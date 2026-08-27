@@ -56,6 +56,15 @@ function prepare() {
 const rangeCutoff = (days) => days === 'all' ? -Infinity : Date.now() - Number(days) * 864e5;
 const inRange = (ms, days) => Number(ms) >= rangeCutoff(days);
 function closeStats(days) {
+  const events = state.data.stats.events || [];
+  if (events.length) {
+    const list = events.filter((e) => inRange(e.t, days));
+    return {
+      net: list.reduce((s, e) => s + Number(e.net || 0), 0),
+      count: list.filter((e) => e.kind === 'close' || e.kind === 'legacy-close').length,
+    };
+  }
+  /* 兼容尚未完成下一次同步的旧数据。 */
   const list = state.closes.filter((p) => inRange(p.updatedTime, days));
   return { net: list.reduce((s, p) => s + Number(p.netProfit || 0), 0), count: list.length };
 }
@@ -70,11 +79,11 @@ function renderOverview() {
   const cards = [
     { k: '账户总权益（USDT）', v: fmt(eq), hint: c ? `≈ ¥${fmt(c, 0)} · 1U≈7.2¥估算` : '', hi: true },
     { k: '未实现盈亏', v: pnl(stats.unrealisedPnl ?? NaN), cls: cls(stats.unrealisedPnl), hint: '当前持仓浮动' },
-    { k: '净已实现盈亏', v: pnl(cs.net), cls: cls(cs.net), hint: `${rangeLabel} ${cs.count} 笔平仓 · 含费用`,
+    { k: '逐笔净已实现盈亏', v: pnl(cs.net), cls: cls(cs.net), hint: `${rangeLabel} ${cs.count} 次平/减仓成交 · 按发生日计`,
       select: `<select id="cardRange" class="range-select">${RANGES.map(([v, l]) => `<option value="${v}" ${v === state.cardRange ? 'selected' : ''}>${l}</option>`).join('')}</select>` },
-    { k: '胜率', v: stats.winRate == null ? '–' : stats.winRate + '%', hint: '按净盈亏计（全程）' },
+    { k: '胜率', v: stats.winRate == null ? '–' : stats.winRate + '%', hint: '按整仓结束后的净盈亏计（全程）' },
     { k: '累计手续费', v: fmt(stats.fees), hint: '全部留档成交（USDT 计价）' },
-    { k: '资金费收支', v: pnl(stats.funding), cls: cls(stats.funding), hint: '已平仓位合计（全程）' },
+    { k: '资金费收支', v: pnl(stats.funding), cls: cls(stats.funding), hint: '按实际发生日；早期流水按历史记录补录' },
   ];
   $('#cards').innerHTML = cards.map((x) => `
     <div class="stat ${x.hi ? 'hi' : ''}">
@@ -101,7 +110,7 @@ function lineChart(el, ptsAll, days) {
   // 选定区间从 0 起算，使图表终值与同区间盈亏卡片口径一致。
   const pts = sorted.filter((p) => Number(p.t) >= cutoff).map((p) => ({ ...p, cum: Number(p.cum) - Number(base) }));
   if (!pts || pts.length < 2) {
-    el.innerHTML = '<div class="placeholder">该区间暂无平仓数据 🌱</div>'; return;
+    el.innerHTML = '<div class="placeholder">该区间暂无逐笔平仓数据 🌱</div>'; return;
   }
   const W = 720, H = 260, P = { l: 46, r: 14, t: 16, b: 26 };
   const xs = pts.map((p) => p.t), ys = pts.map((p) => p.cum);
@@ -142,7 +151,7 @@ function lineChart(el, ptsAll, days) {
     chX.setAttribute('x1', sx(best.t)); chX.setAttribute('x2', sx(best.t));
     chDot.setAttribute('cx', sx(best.t)); chDot.setAttribute('cy', sy(best.cum));
     tip.hidden = false;
-    tip.innerHTML = `<b>${dFull(best.t)}</b> 累计净盈亏 <b class="${cls(best.cum)}">${pnl(best.cum)}</b> USDT`;
+    tip.innerHTML = `<b>${dFull(best.t)}</b> 累计逐笔净盈亏 <b class="${cls(best.cum)}">${pnl(best.cum)}</b> USDT`;
     const tipX = (sx(best.t) / W) * r.width;
     tip.style.left = Math.min(Math.max(tipX - 75, 0), r.width - 160) + 'px';
     tip.style.top = '6px';
@@ -187,7 +196,7 @@ function barChart(el, daysAll, days) {
       $$('.bar', el).forEach((x) => x.setAttribute('opacity', '0.35'));
       r.setAttribute('opacity', '1');
       tip.hidden = false;
-      tip.innerHTML = `<b>${d.d}</b> 当日净盈亏 <b class="${cls(d.pnl)}">${pnl(d.pnl)}</b> USDT`;
+      tip.innerHTML = `<b>${d.d}</b> 当日逐笔净盈亏 <b class="${cls(d.pnl)}">${pnl(d.pnl)}</b> USDT`;
       const rr = svg.getBoundingClientRect();
       tip.style.left = Math.min(Math.max((+r.getAttribute('x') / W) * rr.width - 40, 0), rr.width - 170) + 'px';
       tip.style.top = '6px';

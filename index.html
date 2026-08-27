@@ -47,14 +47,14 @@
     <div class="grid2">
       <div class="card chart-card">
         <div class="card-head">
-          <div class="card-title">累计净盈亏曲线（含手续费与资金费）</div>
+          <div class="card-title">累计逐笔净盈亏（按平/减仓发生日）</div>
           <div class="chart-tabs" id="curveTabs"></div>
         </div>
         <div id="curveChart" class="chart"></div>
       </div>
       <div class="card chart-card">
         <div class="card-head">
-          <div class="card-title">每日净盈亏（UTC+8）</div>
+          <div class="card-title">每日逐笔净盈亏（UTC+8）</div>
           <div class="chart-tabs" id="dailyTabs"></div>
         </div>
         <div id="dailyChart" class="chart"></div>
@@ -63,8 +63,8 @@
 
     <div class="card">
       <div class="card-head">
-        <div class="card-title">最近平仓</div>
-        <a class="more" href="#" data-goto="closes">查看全部 →</a>
+        <div class="card-title">最近整仓结束记录</div>
+        <a class="more" href="#" data-goto="closes">查看全部整仓记录 →</a>
       </div>
       <div class="table-wrap"><table id="recentCloses"></table></div>
     </div>
@@ -169,7 +169,9 @@
       <ul>
         <li>历史范围：<b>2026 年 2 月至今全量记录</b>——2026 年 8 月前为经典账户，由 Bitget 官方导出文件导入；此后由 API 每 20 分钟自动同步并<b>永久归档</b>（API 仅返回近 90 天，但本站归档不会丢失任何老记录）；</li>
         <li>平仓历史中的「导入」「归集」标记：导入 = 经典账户导出文件；归集 = 由成交明细中的平仓盈亏自动汇总（两段数据的衔接处）；</li>
-        <li>净盈亏 = 毛盈亏 − 手续费 ± 资金费，口径与交易所一致；</li>
+        <li><b>总览时间统计按每次实际平仓/减仓成交入账</b>：平仓盈亏记在成交当天，全部合约成交手续费记在成交当天，资金费记在实际收支当天；不再等整个仓位完全清空后一次性归到最后一天；</li>
+        <li>「平仓历史」仍是交易所的整仓生命周期记录，适合看一整个仓位最终结果；「成交明细」可逐笔核对每次平仓成交的盈亏；</li>
+        <li>逐笔净盈亏 = 平仓成交盈亏 − 合约成交手续费 ± 资金费。资金流水 API 仅能回溯近 90 天，更早部分按官方历史仓位的结清日补录；</li>
         <li>充提记录公开链上交易 ID，可验证<b>无外部注资</b>；页面仅统计 <b>Bitget 账户</b>（合约 + 现货），券商部分不在此列。</li>
       </ul>
 

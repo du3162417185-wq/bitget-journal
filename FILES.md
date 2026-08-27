@@ -92,6 +92,7 @@ D:\bitget-journal\
 | historyPositions | **历史平仓（归档合并后）** | API∪导入∪归集∪旧档 |
 | fills | **全部成交（归档合并后，含现货）** | 同上 |
 | orders | **全部委托（归档合并后）** | 同上 |
+| financialRecords | **统一账户资金流水归档**（含资金费真实发生时间） | API∪旧档 |
 | transfers | 充提记录（20 笔，含 txid） | 导入 |
 | tickers | {symbol: {lastPr,bidPr,askPr}} 行情快照 | API 公开接口 |
 | stats | 全部统计指标（见下） | fetch 计算 |
@@ -103,7 +104,9 @@ D:\bitget-journal\
 
 **fills[] 单条字段**：createdTime、symbol、category(USDT-FUTURES/SPOT)、tradeSide(open_long/close_long/…)、side(buy/sell)、orderType、execPrice、execQty、execValue、execPnl(平仓成交才有)、**费用两形态：API 版 feeDetail:[{feeCoin,fee}]，导入版 fee+feeCoin**（前端两种都兼容）、importSource。
 
-**stats 字段**：usdtEquity、unrealisedPnl、realizedPnl(全量净已实现)、closesCount、winRate(净盈亏>0 占比)、fees(仅 USDT 计价)、funding(已平仓位资金费合计)、curve[{t,cum}]、daily[{d,pnl}]、firstCloseAt。
+**financialRecords[] 单条字段**：只公开统计必需的 id、type、symbol、coin、amount、ts。同步脚本先丢弃资金费以外的账户流水以及 balance 等无关字段，再归档最小数据；资金费主要类型为 `CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT`，按 IN/OUT 规范正负号后在 `ts` 当天入账。
+
+**stats 字段**：usdtEquity、unrealisedPnl、realizedPnl(逐笔时间账本全量净已实现)、closesCount(平/减仓成交次数)、winRate(仍按整仓净盈亏>0)、fees(仅 USDT 计价)、funding、events[{t,net,kind}]、curve[{t,cum}]、daily[{d,pnl}]、firstCloseAt、accounting。`events.kind` 为 close(实际平/减仓)、fee(非平仓成交手续费)、funding(实际资金流水)、legacy-close(无成交明细的早期整仓兜底)、legacy-funding(90天资金流水窗口前的补录)。
 
 ### data/reviews.json
 
@@ -115,9 +118,9 @@ D:\bitget-journal\
 
 ### scripts/fetch.mjs（核心，每次同步做什么）
 1. 读 `.env`/环境变量 → 有代理则用 undici ProxyAgent 包装 fetch；
-2. 依次拉 API：settings → account/assets → funding-assets → current-position → unfilled-orders → history-position / fills(合约+现货) / history-orders（cursor 分页，防重复页防御）→ tickers；
-3. **归档合并**（详见 HANDOFF 第 5 节）：旧 data.json + import-history.json + 本次 API → 三类去重合并；缺口归集；
-4. 统计：全量平仓按时间累计 → curve/daily/胜率/净盈亏；手续费仅计 USDT；
+2. 依次拉 API：settings → account/assets → funding-assets → current-position → unfilled-orders → history-position / fills(合约+现货) / history-orders（cursor 分页）→ financial-records（3×30天窗口）→ tickers；
+3. **归档合并**（详见 HANDOFF 第 5 节）：旧 data.json + import-history.json + 本次 API → 平仓、成交、委托、资金流水分别去重合并；缺口归集；
+4. 统计：以每次平/减仓 `execPnl`、每笔合约手续费和真实资金费流水构建 `events` 时间账本 → curve/daily/区间净盈亏；整仓历史只继续用于复盘和整仓胜率；
 5. equity-history.json 追加一点（间隔>5 分钟才记）；
 6. 写 data/data.json。**注意：任何一步失败都保留旧 data.json（站点不挂），错误记入 meta.errors。**
 

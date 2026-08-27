@@ -140,6 +140,19 @@ function mergeOrders(...sources) {
   return [...map.values()];
 }
 
+function mergeFinancialRecords(...sources) {
+  const map = new Map();
+  for (const arr of sources) {
+    for (const r of arr) {
+      const key = r.id
+        ? String(r.id)
+        : `${r.type || ''}|${r.symbol || ''}|${r.coin || ''}|${r.ts || ''}|${r.amount || ''}`;
+      map.set(key, r);
+    }
+  }
+  return [...map.values()];
+}
+
 function mergeFills(...sources) { // 同键多笔（同一订单同一毫秒同价同量的多笔成交）按各源最大计数保留
   const keyOf = (f) => `${f.symbol}|${Math.floor(Number(f.createdTime || 0) / 1000)}|${Number(f.execPrice)}|${Number(f.execQty)}`;
   const final = new Map();
@@ -207,6 +220,38 @@ function synthesizeGapPositions(allFills, knownPositions) {
 
 /* ---------------- 主流程 ---------------- */
 const PT = 'USDT-FUTURES';
+const DAY = 864e5;
+const isFundingRecord = (r) => /(?:SETTLE_FEE|FUNDING).*USER_(?:IN|OUT)$/i.test(String(r.type || ''));
+const publicFundingRecord = (r) => ({
+  id: r.id,
+  type: r.type,
+  symbol: r.symbol,
+  coin: r.coin,
+  amount: r.amount,
+  ts: r.ts,
+});
+
+/* 资金流水单次最多查 30 天、最多回溯 90 天；逐窗分页并与旧归档合并后即可长期保留。 */
+async function getFinancialRecords(category) {
+  const now = Date.now();
+  const coverageStart = now - 90 * DAY;
+  const records = [];
+  let end = now;
+  while (end > coverageStart) {
+    const start = Math.max(coverageStart, end - 30 * DAY + 1);
+    records.push(...await getAll('/api/v3/account/financial-records', {
+      category,
+      startTime: String(start),
+      endTime: String(end),
+    }));
+    end = start - 1;
+    if (end >= coverageStart) await sleep(150);
+  }
+  return {
+    records: mergeFinancialRecords(records.filter(isFundingRecord).map(publicFundingRecord)),
+    coverageStart,
+  };
+}
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, file), 'utf8')); }
@@ -227,6 +272,7 @@ async function main() {
     historyPositions: [],
     fills: [],
     orders: [],
+    financialRecords: [],
     transfers: imp.transfers || [],
     tickers: {},
     stats: {},
@@ -252,7 +298,16 @@ async function main() {
   const apiFills = await getAll('/api/v3/trade/fills', { category: PT }).catch((e) => { errors.push('fills: ' + e.message); return []; });
   const apiSpotFills = await getAll('/api/v3/trade/fills', { category: 'SPOT' }, 40).catch(() => []);
   const apiOrders = await getAll('/api/v3/trade/history-orders', { category: PT }).catch((e) => { errors.push('orders: ' + e.message); return []; });
-  log('API：平仓', apiHistPos.length, '· 成交', apiFills.length + apiSpotFills.length, '· 委托', apiOrders.length);
+  let financialCoverageStart = Number(prev?.meta?.financialRecordsFrom || 0) || null;
+  let apiFinancialRecords = [];
+  try {
+    const financial = await getFinancialRecords(PT);
+    apiFinancialRecords = financial.records;
+    financialCoverageStart = financialCoverageStart
+      ? Math.min(financialCoverageStart, financial.coverageStart)
+      : financial.coverageStart;
+  } catch (e) { errors.push('financialRecords: ' + e.message); }
+  log('API：平仓', apiHistPos.length, '· 成交', apiFills.length + apiSpotFills.length, '· 委托', apiOrders.length, '· 资金费流水', apiFinancialRecords.length);
 
   /* ---------- 归档合并（先归集缺口，再三方合并） ---------- */
   const mergedFills = mergeFills(prev?.fills || [], imp.fills, [...apiFills, ...apiSpotFills]);
@@ -261,6 +316,11 @@ async function main() {
   data.historyPositions = mergePositions(basePositions, gapSynth);
   data.orders = mergeOrders(prev?.orders || [], imp.orders, apiOrders);
   data.fills = mergedFills;
+  data.financialRecords = mergeFinancialRecords(prev?.financialRecords || [], apiFinancialRecords)
+    .filter(isFundingRecord)
+    .map(publicFundingRecord)
+    .sort((a, b) => Number(a.ts) - Number(b.ts));
+  if (financialCoverageStart) data.meta.financialRecordsFrom = financialCoverageStart;
   log('合并后：平仓', data.historyPositions.length, `（含导入 ${imp.positions.length}、归集 ${gapSynth.length}）· 成交`, data.fills.length, '· 委托', data.orders.length);
 
   try {
@@ -268,33 +328,82 @@ async function main() {
     for (const t of tks) data.tickers[t.symbol] = { lastPr: t.lastPr, bidPr: t.bidPr, askPr: t.askPr };
   } catch (e) { errors.push('tickers: ' + e.message); }
 
-  /* ---------------- 统计（基于全量归档） ---------------- */
-  const closes = data.historyPositions
-    .map((p) => ({
-      t: Number(p.updatedTime || p.createdTime || 0),
-      net: Number(p.netProfit ?? 0),
-      pnl: Number(p.cumRealisedPnl ?? 0),
-      fee: -(Number(p.openFeeTotal || 0) + Number(p.closeFeeTotal || 0)),
-      funding: Number(p.totalFunding || 0),
-    }))
-    .filter((c) => c.t > 0)
-    .sort((a, b) => a.t - b.t);
-
-  let cum = 0;
-  const curve = closes.map((c) => { cum += c.net; return { t: c.t, cum: round(cum, 2) }; });
-
-  const dayMap = new Map();
-  for (const c of closes) {
-    const day = new Date(c.t).toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
-    dayMap.set(day, round((dayMap.get(day) || 0) + c.net, 2));
-  }
-  const daily = [...dayMap.entries()].map(([d, pnl]) => ({ d, pnl })).sort((a, b) => a.d.localeCompare(b.d));
-
+  /* ---------------- 统计（逐笔成交日口径） ----------------
+   * history-position 只在仓位彻底归零时返回整段生命周期盈亏，会把数月的多次减仓
+   * 全部挤到最后一天。这里改用 fills.execPnl：每次平仓/减仓在真实成交日入账；
+   * 所有合约成交手续费也按成交日扣除，资金费按 financial-records 的真实发生日计入。
+   */
   const usdtFee = (f) => {
     if (Array.isArray(f.feeDetail)) return f.feeDetail.filter((x) => (x.feeCoin || 'USDT') === 'USDT').reduce((s, x) => s + Number(x.fee || 0), 0);
     return (f.feeCoin || 'USDT') === 'USDT' ? Number(f.fee || 0) : 0;
   };
+  const isCloseFill = (f) => {
+    const side = String(f.tradeSide || '').toLowerCase();
+    return Number(f.execPnl || 0) !== 0
+      || side.includes('close')
+      || /^(reduce|burst|delivery|adl|dte_sys_adl)/.test(side);
+  };
+  const fundingAmount = (r) => {
+    const n = Number(r.amount || 0);
+    if (/_USER_IN$/i.test(r.type || '')) return Math.abs(n);
+    if (/_USER_OUT$/i.test(r.type || '')) return -Math.abs(n);
+    return n;
+  };
+
+  const futuresFills = data.fills.filter((f) => f.category !== 'SPOT' && Number(f.createdTime) > 0);
+  const firstFillAt = Math.min(...futuresFills.map((f) => Number(f.createdTime)), Infinity);
+  const events = [];
+  for (const f of futuresFills) {
+    const close = isCloseFill(f);
+    const pnlValue = close ? Number(f.execPnl || 0) : 0;
+    const feeValue = usdtFee(f);
+    if (close || feeValue) {
+      events.push({
+        t: Number(f.createdTime),
+        net: round(pnlValue - feeValue, 8),
+        kind: close ? 'close' : 'fee',
+      });
+    }
+  }
+
+  /* 早于首份成交明细的 2026-02 历史只能使用交易所导出的整仓净值兜底。 */
+  for (const p of data.historyPositions) {
+    const t = Number(p.updatedTime || p.createdTime || 0);
+    if (t > 0 && t < firstFillAt) {
+      events.push({ t, net: round(Number(p.netProfit || 0), 8), kind: 'legacy-close' });
+    }
+  }
+
+  const actualFunding = data.financialRecords
+    .filter((r) => (r.coin || 'USDT') === 'USDT' && Number(r.ts) > 0 && isFundingRecord(r));
+  for (const r of actualFunding) {
+    events.push({ t: Number(r.ts), net: round(fundingAmount(r), 8), kind: 'funding' });
+  }
+
+  /* 资金流水 API 只提供近 90 天；更早的部分按历史仓位的结清日补录，并明确标记为 legacy。 */
+  const fundingFrom = Number(data.meta.financialRecordsFrom || 0) || Infinity;
+  for (const p of data.historyPositions) {
+    const t = Number(p.updatedTime || p.createdTime || 0);
+    const amount = Number(p.totalFunding || 0);
+    if (amount && t >= firstFillAt && t < fundingFrom) {
+      events.push({ t, net: round(amount, 8), kind: 'legacy-funding' });
+    }
+  }
+
+  events.sort((a, b) => a.t - b.t);
+  let cum = 0;
+  const curve = events.map((e) => { cum += e.net; return { t: e.t, cum: round(cum, 2) }; });
+  const dayMap = new Map();
+  for (const e of events) {
+    const day = new Date(e.t).toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
+    dayMap.set(day, (dayMap.get(day) || 0) + e.net);
+  }
+  const daily = [...dayMap.entries()].map(([d, value]) => ({ d, pnl: round(value, 2) })).sort((a, b) => a.d.localeCompare(b.d));
+
   const fees = round(data.fills.reduce((s, f) => s + usdtFee(f), 0), 2);
+  const funding = round(events.filter((e) => e.kind === 'funding' || e.kind === 'legacy-funding')
+    .reduce((s, e) => s + e.net, 0), 2);
+  const partialCloses = events.filter((e) => e.kind === 'close' || e.kind === 'legacy-close');
   const usdtEquity = round(Number(data.accountAssets?.usdtEquity ?? data.accountAssets?.accountEquity ?? 0), 2);
 
   /* 权益快照（长期净值曲线，逐次追加） */
@@ -312,18 +421,26 @@ async function main() {
     accountEquity: data.accountAssets ? round(Number(data.accountAssets.accountEquity || 0), 2) : null,
     unrealisedPnl: data.accountAssets ? round(Number(data.accountAssets.unrealisedPnl ?? data.accountAssets.usdtUnrealisedPnl ?? 0), 2) : null,
     realizedPnl: round(cum, 2),
-    closesCount: closes.length,
-    winRate: closes.length ? round((closes.filter((c) => c.net > 0).length / closes.length) * 100, 1) : null,
+    closesCount: partialCloses.length,
+    winRate: data.historyPositions.length ? round((data.historyPositions.filter((p) => Number(p.netProfit || 0) > 0).length / data.historyPositions.length) * 100, 1) : null,
     fees,
-    funding: round(closes.reduce((s, c) => s + c.funding, 0), 2),
+    funding,
+    events,
     curve,
     daily,
-    firstCloseAt: closes.length ? closes[0].t : null,
+    firstCloseAt: partialCloses.length ? partialCloses[0].t : null,
+    accounting: {
+      method: 'fill-exec-pnl',
+      timeZone: 'Asia/Shanghai',
+      fillFrom: Number.isFinite(firstFillAt) ? firstFillAt : null,
+      financialRecordsFrom: Number.isFinite(fundingFrom) ? fundingFrom : null,
+      note: '平仓盈亏按每次成交日计；合约成交手续费按成交日扣；资金费按实际流水日计，90天以前无流水的部分按历史仓位结清日补录。',
+    },
   };
   data.meta.errors = errors;
 
   fs.writeFileSync(path.join(DATA_DIR, 'data.json'), JSON.stringify(data));
-  log(`完成：权益≈${usdtEquity} USDT · 全量净已实现盈亏 ${data.stats.realizedPnl}（${closes.length} 笔平仓）· 手续费 ${fees}`);
+  log(`完成：权益≈${usdtEquity} USDT · 逐笔净已实现盈亏 ${data.stats.realizedPnl}（${partialCloses.length} 次平/减仓成交）· 手续费 ${fees}`);
   if (errors.length) log('警告', errors.length, '条:', errors.slice(0, 3).join(' | '));
 }
 

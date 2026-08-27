@@ -58,6 +58,7 @@ Bitget 统一账户 v3 只读 API →（GitHub Actions 每 20 分钟）`scripts/
    - `GET /api/v3/account/assets`（总权益）、`/api/v3/account/settings`
    - `GET /api/v3/position/current-position`、`/api/v3/position/history-position`（**仅保留约 90 天**）
    - `GET /api/v3/trade/fills`、`/api/v3/trade/history-orders`、`/api/v3/trade/unfilled-orders`
+   - `GET /api/v3/account/financial-records`（资金费真实发生时间；最多回溯 90 天，单次区间最多 30 天）
    - 公开行情：`GET /api/v3/market/tickers?category=USDT-FUTURES`
 2. 鉴权：header `ACCESS-KEY / ACCESS-SIGN / ACCESS-TIMESTAMP / ACCESS-PASSPHRASE`；签名 = Base64(HMAC-SHA256(ts + "GET" + path含query + ""))；成功码 `00000`。
 3. 分页：`limit=100` + 响应里的 `cursor` 回传（不是 pageNo）。
@@ -70,10 +71,11 @@ API 只给近 90 天平仓/成交，但网站承诺"全量、不丢失"。`fetch
 - 平仓：按 `symbol+posSide+平仓秒级时间戳` 去重，源优先级 旧归档 < CSV导入 < API（后源覆盖同键）；
 - 委托：按 `orderId` 去重；
 - 成交：多重集去重——键 = `symbol|秒|成交价|数量`，同键多笔按各源最大计数保留（处理同一毫秒多笔同量成交）；后源覆盖（API 版含 execPnl，优先于 CSV 版）；
+- 资金流水：按流水 `id` 去重；每次分 3 个 30 天窗口抓满近 90 天，并与旧 `financialRecords` 合并永久归档；
 - **缺口归集**：经典账户 CSV（止于 2026-06-04）与 API 平仓（始于 06-25）之间的缺口，用成交明细里的平仓方向+execPnl 按"币种+方向+自然日"归集成伪平仓记录，`importSource: 'gap-synth'`，页面上标「归集」；
 - ⚠️ **`data/data.json` 就是归档本体，永远不要删它**（删了 = 丢掉 90 天窗口外的全部历史）。equity-history.json 同理（追加式快照）。
 
-统计口径（`stats`）：净盈亏 = 毛盈亏 − 手续费 ± 资金费（同交易所）；胜率按净盈亏>0 计；手续费只累计 USDT 计价部分。
+时间统计口径（`stats`）已于 2026-08-27 改为**逐笔成交日入账**：每次平仓/减仓的 `fills.execPnl` 记在真实成交日，所有合约成交手续费按成交日扣除，资金费按 `financial-records.ts` 的真实收支日计入。资金流水 API 覆盖之前的早期资金费只能按官方历史仓位结清日补录；2026-02 首批没有逐笔成交明细的 9 个整仓记录也以 `legacy-close` 兜底。胜率仍按整仓 `netProfit>0` 计算，避免把同一订单拆成多次撮合后扭曲胜率。
 
 ## 6. 经典账户历史导入（scripts/import-history.mjs）
 
@@ -118,9 +120,9 @@ git -c http.proxy=http://127.0.0.1:7897 push
 | 查工作流状态 | `gh run list -R du3162417185-wq/bitget-journal --limit 5` |
 | 国内打不开 | 已知问题（github.io 被墙）。预案：迁 Cloudflare Pages——repo 接入 CF Pages（build 无命令、输出根目录），定时同步改为 CF Workers Cron 或仍用 GitHub Actions push（CF 自动部署）；域名换成 pages.dev |
 
-## 9. 当前数据基线（2026-08-27 15:46）
+## 9. 当前数据基线（2026-08-27 18:29）
 
-平仓 88 笔（CSV 导入 54 / API 27 / 归集 7），全量净已实现盈亏 **+1,801.03 USDT**，胜率 56.8%，手续费 152.75，资金费 −166.33，成交 2,117 笔，委托 608 笔，充提 20 笔（含链上 txid，证明无外部注资），首笔平仓 2026-02-12，权益约 3,667.09 USDT（另有券商仓位不在本站范围）。
+逐笔平/减仓成交 715 次，逐笔全量净已实现盈亏 **+2,018.88 USDT**；近 30 天 **+527.91 USDT**；2026-06-03 当日 **+359.44 USDT**（均为扣实际成交手续费及可获得资金费后的时间口径）。整仓结束记录 89 笔（CSV 导入 54 / API 28 / 归集 7），整仓胜率 57.3%，手续费 153.01，时间账本资金费 −173.99，成交 2,122 笔，委托 617 笔，资金费流水归档 142 条，充提 20 笔，权益约 3,690.00 USDT（数字会随自动同步变化）。
 
 ## 10. 环境清单
 

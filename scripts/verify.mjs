@@ -19,6 +19,14 @@ assert(data?.meta?.generatedAtMs, 'data.json 缺少 meta.generatedAtMs');
 assert(Array.isArray(data.historyPositions), 'data.json 缺少 historyPositions');
 assert(Array.isArray(data.stats?.curve), 'data.json 缺少 stats.curve');
 assert(Array.isArray(data.stats?.daily), 'data.json 缺少 stats.daily');
+assert(Array.isArray(data.stats?.events), 'data.json 缺少 stats.events');
+assert(data.stats?.accounting?.method === 'fill-exec-pnl', '统计尚未切换到逐笔成交口径');
+assert(Array.isArray(data.financialRecords), 'data.json 缺少 financialRecords');
+const publicFinancialKeys = new Set(['id', 'type', 'symbol', 'coin', 'amount', 'ts']);
+for (const record of data.financialRecords) {
+  assert(/(?:SETTLE_FEE|FUNDING).*USER_(?:IN|OUT)$/i.test(String(record.type || '')), `混入非资金费流水：${record.type}`);
+  assert(Object.keys(record).every((key) => publicFinancialKeys.has(key)), `资金费流水含多余公开字段：${Object.keys(record).join(',')}`);
+}
 assert(reviews && typeof reviews === 'object' && !Array.isArray(reviews), 'reviews.json 顶层必须是对象');
 
 const positions = new Map();
@@ -37,14 +45,23 @@ for (const [key, review] of Object.entries(reviews)) {
 
 for (const days of [30, 60, 90]) {
   const cutoff = Date.now() - days * 864e5;
-  const intervalNet = data.historyPositions
-    .filter((p) => Number(p.updatedTime) >= cutoff)
-    .reduce((sum, p) => sum + Number(p.netProfit || 0), 0);
+  const intervalNet = data.stats.events
+    .filter((e) => Number(e.t) >= cutoff)
+    .reduce((sum, e) => sum + Number(e.net || 0), 0);
   const before = data.stats.curve.filter((p) => Number(p.t) < cutoff).at(-1)?.cum || 0;
   const last = data.stats.curve.filter((p) => Number(p.t) >= cutoff).at(-1)?.cum;
   const chartNet = last == null ? 0 : Number(last) - Number(before);
-  assert(Math.abs(intervalNet - chartNet) < 0.2, `${days} 天曲线与盈亏卡片口径不一致：${chartNet} / ${intervalNet}`);
+  assert(Math.abs(intervalNet - chartNet) < 0.2, `${days} 天逐笔曲线与盈亏卡片口径不一致：${chartNet} / ${intervalNet}`);
 }
+
+const june3Start = Date.parse('2026-06-03T00:00:00+08:00');
+const june4Start = Date.parse('2026-06-04T00:00:00+08:00');
+const june3ClosePnl = data.fills
+  .filter((f) => f.category !== 'SPOT' && Number(f.createdTime) >= june3Start && Number(f.createdTime) < june4Start)
+  .reduce((sum, f) => sum + Number(f.execPnl || 0), 0);
+const june3Daily = Number(data.stats.daily.find((d) => d.d === '2026-06-03')?.pnl || 0);
+assert(june3ClosePnl > 300 && june3ClosePnl < 400, `6月3日逐笔平仓毛盈亏异常：${june3ClosePnl}`);
+assert(june3Daily > 300 && june3Daily < 400, `6月3日每日逐笔净盈亏仍疑似整仓归集：${june3Daily}`);
 
 for (const id of ['cards', 'curveChart', 'dailyChart', 'recentCloses', 'closesTable', 'reviewModal', 'rvSym', 'rvMeta', 'rvBody']) {
   assert(html.includes(`id="${id}"`), `index.html 缺少 #${id}`);
@@ -61,5 +78,6 @@ console.log([
   `平仓 ${data.historyPositions.length} 笔`,
   `曲线 ${data.stats.curve.length} 点`,
   `每日 ${data.stats.daily.length} 天`,
+  `逐笔平/减仓 ${data.stats.closesCount} 次`,
   `作者复盘 ${Object.keys(reviews).length} 条`,
 ].join(' · '));
