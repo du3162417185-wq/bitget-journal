@@ -440,6 +440,11 @@ async function main() {
   data.meta.errors = errors;
 
   fs.writeFileSync(path.join(DATA_DIR, 'data.json'), JSON.stringify(data));
+  /* 版本文件必须最后写：前端看到新版本时，对应的完整 data.json 已经就绪。 */
+  fs.writeFileSync(path.join(DATA_DIR, 'version.json'), JSON.stringify({
+    generatedAt: data.meta.generatedAt,
+    generatedAtMs: data.meta.generatedAtMs,
+  }));
   log(`完成：权益≈${usdtEquity} USDT · 逐笔净已实现盈亏 ${data.stats.realizedPnl}（${partialCloses.length} 次平/减仓成交）· 手续费 ${fees}`);
   if (errors.length) log('警告', errors.length, '条:', errors.slice(0, 3).join(' | '));
 }

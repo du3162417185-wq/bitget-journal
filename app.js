@@ -31,17 +31,50 @@ const rvKey = (p) => `${p.symbol}|${p.posSide || ''}|${Math.floor(Number(p.updat
 
 const state = { data: null, reviews: {}, closes: [], fills: [], orders: [], range: 'all', cardRange: 'all' };
 let reviewOpener = null;
+let loadedVersion = 0;
+let loadPromise = null;
+let lastFallbackLoadAt = 0;
 
 /* ---------- 数据加载 ---------- */
-async function load() {
-  const [r, rr] = await Promise.all([
-    fetch(`data/data.json?t=${Date.now()}`),
-    fetch(`data/reviews.json?t=${Date.now()}`).catch(() => null),
-  ]);
-  state.data = await r.json();
-  try { state.reviews = rr && rr.ok ? await rr.json() : {}; } catch { state.reviews = {}; }
-  prepare();
-  renderAll();
+async function load(cacheKey = Date.now()) {
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
+    const key = encodeURIComponent(String(cacheKey));
+    const [r, rr] = await Promise.all([
+      fetch(`data/data.json?v=${key}`),
+      fetch(`data/reviews.json?v=${key}`).catch(() => null),
+    ]);
+    if (!r.ok) throw new Error(`data.json HTTP ${r.status}`);
+    const nextData = await r.json();
+    let nextReviews = {};
+    try { nextReviews = rr && rr.ok ? await rr.json() : {}; } catch { /* 复盘损坏不影响交易数据 */ }
+    state.data = nextData;
+    state.reviews = nextReviews;
+    loadedVersion = Number(nextData?.meta?.generatedAtMs || cacheKey || Date.now());
+    lastFallbackLoadAt = Date.now();
+    prepare();
+    renderAll();
+  })();
+  try { return await loadPromise; }
+  finally { loadPromise = null; }
+}
+
+/* 每分钟只检查百余字节的版本文件；版本变化才下载完整 data.json。 */
+async function checkForUpdate() {
+  if (document.hidden || loadPromise) return;
+  try {
+    const minute = Math.floor(Date.now() / 60000);
+    const r = await fetch(`data/version.json?t=${minute}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`version.json HTTP ${r.status}`);
+    const version = await r.json();
+    const nextVersion = Number(version?.generatedAtMs || 0);
+    if (nextVersion > loadedVersion) await load(nextVersion);
+  } catch (error) {
+    // 兼容版本文件尚未部署或 CDN 短暂异常：最多每 5 分钟回退一次完整刷新。
+    if (Date.now() - lastFallbackLoadAt >= 5 * 60 * 1000) {
+      await load().catch((e) => console.warn('[refresh]', e));
+    }
+  }
 }
 
 function prepare() {
@@ -485,5 +518,10 @@ if (window.REPO_URL) {
   a.href = window.REPO_URL; a.hidden = false;
 }
 
-load();
-setInterval(load, 5 * 60 * 1000);
+load().catch((error) => {
+  console.error('[load]', error);
+  $('#syncTime').textContent = '加载失败，请刷新重试';
+});
+setInterval(checkForUpdate, 60 * 1000);
+window.addEventListener('focus', checkForUpdate);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });

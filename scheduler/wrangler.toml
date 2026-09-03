@@ -1,0 +1,6 @@
+name = "bitget-journal-scheduler"
+main = "worker.mjs"
+compatibility_date = "2026-09-04"
+
+[triggers]
+crons = ["2-59/5 * * * *"]

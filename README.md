@@ -14,12 +14,14 @@ scripts/import-history.mjs        一次性：导入经典账户官方导出文�
 scripts/review-server.mjs         本机作者复盘服务（同步最新交易→保存→提交→推送）
 scripts/verify.mjs                不联网、不改数据的项目静态自检
 data/data.json                    每次同步生成的数据（被网站读取、随仓库提交留痕）
+data/version.json                 小型版本清单（前端用它判断是否需要重载完整数据）
 data/equity-history.json          长期净值曲线快照（逐次追加）
 data/reviews.json                 作者复盘（按平仓唯一键关联，公开只读）
 admin.html / 点评.bat             本机复盘编辑器及双击入口
 sync-and-push.bat                 Windows 本地手动/定时同步并推送
-.github/workflows/sync.yml        GitHub Actions 每 20 分钟自动同步
+.github/workflows/sync.yml        同步、选择性归档并直接部署 Pages
 .github/workflows/deploy.yml      数据/页面更新时自动发布 GitHub Pages
+scheduler/                        Cloudflare Worker：每 5 分钟触发一次快速同步
 ```
 
 ## 本地运行
@@ -46,7 +48,19 @@ BITGET_PROXY=http://127.0.0.1:7897   # 服务器上不需要，留空
 2. 仓库 Settings → Secrets and variables → Actions 添加三个 Secret：
    `BITGET_KEY`、`BITGET_SECRET`、`BITGET_PASSPHRASE`；
 3. Settings → Pages → Build and deployment → Source 选 **GitHub Actions**；
-4. 手动触发一次「同步 Bitget 数据」工作流，之后每 20 分钟自动同步，页面自动更新。
+4. 手动触发一次「同步 Bitget 数据」工作流；GitHub 自带计划任务每 20 分钟兜底同步。
+
+## 5 分钟快速刷新（Cloudflare Workers，免费）
+
+`scheduler/worker.mjs` 每 5 分钟只调用一次 GitHub 的 `workflow_dispatch`：快速运行会直接发布最新快照，每小时其中一次才提交长期归档。浏览器每分钟只读取很小的 `data/version.json`，确认版本变化后才下载完整数据。通常从 Bitget 变化到页面可见约 3～6 分钟；GitHub/Cloudflare 排队时可能更久。
+
+Cloudflare 只保存一个名为 `GITHUB_ACTIONS_TOKEN` 的 Secret。它应使用 GitHub fine-grained token，并严格限定为：
+
+- 仅仓库 `du3162417185-wq/bitget-journal`；
+- Repository permissions 只开启 `Actions: Read and write`；
+- 设置到期时间，绝不写入仓库、日志或网页。
+
+Bitget 的三项凭据仍然只在 GitHub Secrets 中，**不会交给 Cloudflare**。免费额度下每天约 288 次 Cron 调用、GitHub 公共仓库 Actions 与 Pages 均为 0 元。
 
 > 若 Actions 服务器访问 Bitget 受阻（同步工作流报错），改用本地同步：
 > 双击 `sync-and-push.bat`（需代理已启动），或用任务计划程序每 20 分钟执行一次。
@@ -61,4 +75,6 @@ BITGET_PROXY=http://127.0.0.1:7897   # 服务器上不需要，留空
 
 - API 密钥为**只读**权限：无交易、无提现能力；
 - 密钥只存在本地 `.env` 与 GitHub Secrets 中，页面与仓库中不出现任何密钥；
+- Cloudflare 调度令牌只允许触发本仓库 Actions，不能读取 Bitget 密钥或操作交易；
+- Actions 全部固定到完整 commit SHA，依赖安装禁用生命周期脚本，checkout 不持久保存写令牌；
 - 若怀疑密钥泄露，随时到 Bitget 后台删除该 API 即可，不影响账户资金。

@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-09-04（刷新提速 + 公开仓库安全加固）
+
+### 需求与原因
+- 用户准备把 GitHub 仓库和交易记录网站公开发到 X，希望只读 API 同步更快，同时要求成本不增加、现有统计/归档能力不退化，并重新确认公开安全性。
+- 实测最近 100 次同步均成功、单次中位耗时约 39 秒，但 GitHub `schedule` 实际启动间隔中位约 63 分钟，最近通常每天只有 5～7 次；瓶颈是 GitHub 定时事件会延迟/丢弃，不是 Bitget 限频，也不是脚本运行太慢。单纯把 cron 从 20 改成 5 分钟不能保证刷新速度。
+
+### 实施方案
+- 新增 `scheduler/worker.mjs`：Cloudflare Cron 每 5 分钟调用固定仓库 `sync.yml` 的 `workflow_dispatch`。它不接触 Bitget 凭据、交易数据或 Pages 内容，只持有一个仅限本仓库 `Actions: Read and write` 的 fine-grained GitHub token。
+- `sync.yml` 新增 `persist` 输入：快速运行每次抓取并直接发布 Pages，但不提交仓库；每小时一次持久化完整 `data/*.json`。原 GitHub 20 分钟 cron 保留并始终归档，作为 Cloudflare 故障时的独立兜底。
+- 新增 `data/version.json`；前端每分钟只检查小版本文件，版本变化才下载完整 `data.json`。版本探针失败时保留 5 分钟完整刷新兜底，且用单一 Promise 阻止多个刷新重叠。
+- 两个工作流的官方 Actions 全部固定到完整 commit SHA；checkout 不持久保存仓库凭据；npm 安装禁用生命周期脚本；仓库写令牌仅在归档提交步骤注入。
+- 免费额度估算：Cloudflare 每天 288 次 Cron，远低于免费额度；GitHub 公共仓库标准 Actions 与 Pages 不收费，预计新增成本 **0 元/月**。
+
+### 进度
+- [x] 从最新远端 main 建立 `codex/faster-safe-sync` 回退分支，不触碰三个用户本地未跟踪文件
+- [x] 完成工作流分流、版本探针、前端增量刷新和 Cloudflare 调度器源码
+- [x] 扩充 `npm run verify`：覆盖版本一致性、刷新逻辑、固定 SHA 与调度器凭据边界
+- [x] 本地回归通过：`verify` 通过（90 笔整仓、2,214 个曲线事件、746 次平/减仓）；4 个 JS 文件语法通过；TOML 与 `git diff --check` 通过；实际浏览器渲染 6 卡/2 图/7 标签、区间切换正常、控制台零错误
+- [x] 安全扫描通过：用本地三项真实 Bitget 凭据只比较不打印，27 个待发布/已跟踪文件和全部 149 个历史提交均为 0 命中；`.env` 未跟踪且由 `.gitignore` 排除；常见 GitHub/AWS/私钥高风险模式 0 命中
+- [ ] Cloudflare Secret 与 Cron 实际部署
+- [ ] 推送 main、触发线上同步并验证 Pages 公共发布边界与刷新链路
+
+---
+
 ## 2026-08-23（Day 1：从需求到上线）
 
 ### 1. 需求确认

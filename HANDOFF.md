@@ -1,6 +1,6 @@
 # 项目交接文档 — Successful西西弗斯 | 交易日记（Bitget 实盘同步站）
 
-> 最后更新：2026-08-27。本文档面向接手维护的 AI/开发者，覆盖全部架构、文件位置、凭据位置、已知坑与运维手册。
+> 最后更新：2026-09-04。本文档面向接手维护的 AI/开发者，覆盖全部架构、文件位置、凭据位置、已知坑与运维手册。
 
 ## 1. 项目是什么
 
@@ -10,11 +10,11 @@
 - **代码仓库**：https://github.com/du3162417185-wq/bitget-journal（公开）
 - **本地目录**：`D:\bitget-journal`（Windows + Git Bash；⚠️ 用户规矩：**任何文件不许放 C 盘**）
 - **GitHub 账号**：`du3162417185-wq`，gh CLI 已装（`C:\Program Files\GitHub CLI\gh.exe`）且已登录
-- **成本**：0 元（GitHub Pages + Actions 免费额度），用户无需服务器、无需开机
+- **成本**：0 元（GitHub Pages + 公共仓库 Actions + Cloudflare Workers 免费额度），用户无需服务器、无需开机
 
 ## 2. 架构与数据流（一句话版）
 
-Bitget 统一账户 v3 只读 API →（GitHub Actions 每 20 分钟）`scripts/fetch.mjs` 抓取并与历史归档**合并** → 写入 `data/data.json` → 提交到仓库 → 同一工作流直接部署 GitHub Pages → 访客浏览器读 `data.json` 渲染。
+Cloudflare Cron 每 5 分钟触发 GitHub Actions → `scripts/fetch.mjs` 从 Bitget 统一账户 v3 **只读 API** 抓取并与历史归档合并 → 快速运行直接部署 GitHub Pages，每小时一次提交 `data/*.json` 作为长期归档 → 访客浏览器每分钟检查 `version.json`，版本变化才读取完整 `data.json`。GitHub 自带 20 分钟 cron 继续作为独立兜底。
 
 ```
 ┌─ 本地 D:\bitget-journal ─────────────────────────────┐
@@ -24,18 +24,20 @@ Bitget 统一账户 v3 只读 API →（GitHub Actions 每 20 分钟）`scripts/
 │ scripts/review-server.mjs            本机作者复盘服务（同步→保存→提交→推送）│
 │ scripts/verify.mjs                   不联网、不改数据的静态自检 │
 │ data/data.json                       全量数据（网站唯一数据源，也是归档本体）│
+│ data/version.json                    小型版本清单（前端增量刷新探针） │
 │ data/equity-history.json             权益快照，逐次追加（长期净值曲线） │
 │ data/import-history.json             经典账户导入数据（静态，2026-02~07）│
 │ data/reviews.json                    作者复盘（平仓唯一键→正文/时间）│
 │ admin.html / 点评.bat                本机复盘编辑器与双击入口 │
 │ .env                                 密钥（被 .gitignore 排除，绝不入库）│
 │ sync-and-push.bat                    Windows 本地手动同步+推送 │
-│ .github/workflows/sync.yml           每 20 分钟：抓取→合并→提交→部署 Pages │
+│ .github/workflows/sync.yml           抓取→选择性归档→每次部署 Pages │
 │ .github/workflows/deploy.yml         手动改页面推仓库时：部署 Pages │
+│ scheduler/worker.mjs + wrangler.toml Cloudflare 5 分钟触发器（不接触 Bitget）│
 └──────────────────────────────────────────────────────┘
 ```
 
-前端标签页：总览（指标卡+累计盈亏曲线+每日盈亏柱图）/ 当前持仓 / 平仓历史 / 成交明细 / 历史委托 / 充提记录 / 关于本站。表格可筛选、可导出 CSV。前端每 5 分钟带 `?t=` 缓存穿透参数自动刷新数据。
+前端标签页：总览（指标卡+累计盈亏曲线+每日盈亏柱图）/ 当前持仓 / 平仓历史 / 成交明细 / 历史委托 / 充提记录 / 关于本站。表格可筛选、可导出 CSV。前端每分钟用 `cache:no-store` 检查百余字节的版本文件；仅在版本号变化时用版本化 URL 重载完整数据，并在版本探针异常时保留 5 分钟完整刷新兜底。
 
 ### 2.1 作者复盘数据流
 
@@ -51,6 +53,7 @@ Bitget 统一账户 v3 只读 API →（GitHub Actions 每 20 分钟）`scripts/
 - 存放位置：本地 `D:\bitget-journal\.env`（`BITGET_KEY / BITGET_SECRET / BITGET_PASSPHRASE / BITGET_PROXY`）+ GitHub 仓库 Secrets（同前三项，Actions 用）。
 - **绝不能**把密钥写进任何入库文件（`.env` 已被 `.gitignore` 排除并验证）。
 - 轮换方法：Bitget 后台删旧建新 → 改 `.env` → `gh secret set BITGET_KEY -R du3162417185-wq/bitget-journal -b "新值"`（三个各来一次）。
+- Cloudflare 只有 `GITHUB_ACTIONS_TOKEN`：GitHub fine-grained token，仓库范围仅本项目，权限仅 `Actions: Read and write`，设到期时间；它只能触发工作流，不能读取 Actions Secrets，也不能访问 Bitget。不要把 token 写进 `wrangler.toml` 或任何文件。
 
 ## 4. Bitget API 关键事实（血泪坑）
 
@@ -96,16 +99,17 @@ cd /d/bitget-journal
 # 改完代码后：
 git add -A
 git commit -m "说明"
-git -c http.proxy=http://127.0.0.1:7897 pull --rebase -X ours origin main   # 必须！自动同步每20分钟产生远端提交
+git -c http.proxy=http://127.0.0.1:7897 pull --rebase -X ours origin main   # 必须！自动归档会产生远端提交
 git -c http.proxy=http://127.0.0.1:7897 push
 ```
 
 - 仓库级 git 身份已配置（user.name=xixifusi）；全局没配，命令行临时身份不再需要。
-- 直接 push 会触发 `deploy.yml` 部署；定时同步的提交由 `sync.yml` 自己部署——因为 **GITHUB_TOKEN 的 push 不会触发其他工作流**（防递归设计），所以 sync.yml 里内置了 Pages 部署步骤。
+- 直接 push 会触发 `deploy.yml` 部署；`sync.yml` 每次运行都直接部署本次快照。`persist=false` 的快速运行不提交仓库，每小时 `persist=true` 一次以及 GitHub 原生 cron 会提交长期归档。
 - 两个工作流都会先整理 `_site`，仅发布前端、JSON 数据和四份说明文档；不会把 `admin.html`、本机脚本、node_modules 或其他开发文件发布到 Pages。
 - Pages 已启用 build_type=workflow；`configure-pages` 带 `enablement: true`。
-- Pages CDN 对 data.json 缓存约 10 分钟；前端用 `?t=时间戳` 穿透，无需处理。
-- 手动触发同步：`gh workflow run sync.yml -R du3162417185-wq/bitget-journal`（gh 命令需 `export https_proxy=http://127.0.0.1:7897`）。
+- Pages CDN 对 data.json 有缓存；前端先轮询 `version.json?t=分钟号`，发现变化后读取 `data.json?v=生成时间`，不会把 1MB 级完整数据每分钟重复下载。
+- 手动归档并部署：`gh workflow run sync.yml -R du3162417185-wq/bitget-journal -f persist=true`；仅快速部署用 `-f persist=false`（gh 命令需走本机代理）。
+- 两个工作流引用的官方 Actions 均固定到完整 commit SHA；checkout 不持久保存凭据，`npm ci --ignore-scripts` 禁止依赖生命周期脚本，仓库写令牌只在归档提交步骤注入。
 
 ## 8. 常见运维
 
@@ -118,6 +122,7 @@ git -c http.proxy=http://127.0.0.1:7897 push
 | 改页面文案/样式 | 改 index.html/app.js/style.css → 按第 7 节推送 |
 | 导入新历史文件 | 见第 6 节 |
 | 查工作流状态 | `gh run list -R du3162417185-wq/bitget-journal --limit 5` |
+| 查 5 分钟调度 | Cloudflare Dashboard → Workers & Pages → bitget-journal-scheduler → Triggers / Logs |
 | 国内打不开 | 已知问题（github.io 被墙）。预案：迁 Cloudflare Pages——repo 接入 CF Pages（build 无命令、输出根目录），定时同步改为 CF Workers Cron 或仍用 GitHub Actions push（CF 自动部署）；域名换成 pages.dev |
 
 ## 9. 当前数据基线（2026-08-27 18:29）

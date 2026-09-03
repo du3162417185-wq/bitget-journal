@@ -3,6 +3,12 @@ on:
   schedule:
     - cron: '*/20 * * * *'   # 每 20 分钟（UTC）
   workflow_dispatch:
+    inputs:
+      persist:
+        description: '把本次快照提交到长期归档（快速刷新可关闭）'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -20,39 +26,43 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # 抓取步骤不保留仓库写令牌；只在提交步骤短暂注入最小权限令牌。
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-      - run: npm ci
-      - run: node scripts/fetch.mjs
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: 读取 Bitget 并生成快照
+        run: node scripts/fetch.mjs
         env:
           BITGET_KEY: ${{ secrets.BITGET_KEY }}
           BITGET_SECRET: ${{ secrets.BITGET_SECRET }}
           BITGET_PASSPHRASE: ${{ secrets.BITGET_PASSPHRASE }}
 
-      - name: 提交数据
-        id: commit
+      - name: 提交长期归档
+        if: github.event_name == 'schedule' || inputs.persist == true
+        env:
+          GH_PUSH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "sync-bot"
           git config user.email "actions@github.com"
           git add data
           if git diff --cached --quiet; then
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "数据没有变化，无需提交"
           else
             git commit -m "数据同步 $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')"
-            git push
-            echo "changed=true" >> $GITHUB_OUTPUT
+            git push "https://x-access-token:${GH_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
           fi
 
-      # 注意：GITHUB_TOKEN 的推送不会触发其他工作流，因此这里直接部署
+      # 快速刷新即使不提交归档，也要把本次内存快照直接发布到 Pages。
       - name: 部署页面
-        if: steps.commit.outputs.changed == 'true'
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
         with:
           enablement: true
       - name: 整理公开站点
-        if: steps.commit.outputs.changed == 'true'
         shell: bash
         run: |
           mkdir -p _site/data
@@ -60,10 +70,8 @@ jobs:
           cp data/*.json _site/data/
           cp README.md HANDOFF.md DEVLOG.md FILES.md _site/
       - name: 上传站点
-        if: steps.commit.outputs.changed == 'true'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: _site
       - id: deployment
-        if: steps.commit.outputs.changed == 'true'
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
