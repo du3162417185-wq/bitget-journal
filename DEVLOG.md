@@ -24,12 +24,13 @@
 - [x] 扩充 `npm run verify`：覆盖版本一致性、刷新逻辑、固定 SHA 与调度器凭据边界
 - [x] 本地回归通过：`verify` 通过（90 笔整仓、2,214 个曲线事件、746 次平/减仓）；4 个 JS 文件语法通过；TOML 与 `git diff --check` 通过；实际浏览器渲染 6 卡/2 图/7 标签、区间切换正常、控制台零错误
 - [x] 安全扫描通过：用本地三项真实 Bitget 凭据只比较不打印，27 个待发布/已跟踪文件和全部 149 个历史提交均为 0 命中；`.env` 未跟踪且由 `.gitignore` 排除；常见 GitHub/AWS/私钥高风险模式 0 命中
-- [x] Cloudflare Worker `bitget-journal-scheduler` 已部署，Cron 为 `2-59/5 * * * *`；`GITHUB_ACTIONS_TOKEN` 仅以 Worker Secret 保存，GitHub token 仅限本仓库、权限仅 `Actions: Read and write`，2026-12-03 到期
+- [x] Cloudflare Worker `bitget-journal-scheduler` 已部署（最终版本 `151c56e0-b9fa-447c-b4c5-d0d072f6f702`），Cron 为 `2-59/5 * * * *`；`GITHUB_ACTIONS_TOKEN` 仅以 Worker Secret 保存，GitHub token 仅限本仓库、权限仅 `Actions: Read and write`，2026-12-03 到期
 - [x] Worker 公网与预览 URL 已关闭（`workers_dev=false`、`preview_urls=false`）；旧 `workers.dev` 地址实测返回 404，Worker 只保留定时事件入口
 - [x] 真实 Cron 于 08:27:30 UTC 触发 run `33853527235`，抓取、Pages 部署均成功，`persist=false` 的归档提交步骤按设计跳过；run 于 08:34:27 UTC 完成
 - [x] 首轮发现 `npm ci` 为安装 1 个线上并不使用的代理依赖耗时 6 分 13 秒；已从 Actions 删除安装步骤并扩充自检断言，Bitget 抓取本身只用约 13 秒
 - [x] 令牌卫生：配置期间凡曾在一次性页面输出中出现过的临时 token 均立即撤销；最终 Secret 使用重新生成且未输出的 token，浏览器剪贴板与一次性页面均已清空
-- [ ] 推送本轮无依赖优化，再由真实 Cron 验证端到端耗时
+- [x] 无依赖优化以 `70e0d7a` 推送 main；真实 Cron run `33873718351` 于 12:37:31 UTC 创建、12:38:11 UTC 完成，总耗时 40 秒：没有 npm 安装步骤，抓取/发布成功，归档提交按设计跳过
+- [x] 公开站点最终核验：`version.json` 与 `data.json` 的生成版本均为 2026-09-04T12:42:46.107Z，`meta.errors=0`；当时快照权益 3,591.82 USDT、逐笔净已实现 2,130.67 USDT、平/减仓成交 753 次、当前持仓 5 个
 
 ---
 
