@@ -15,7 +15,7 @@
 - 新增 `scheduler/worker.mjs`：Cloudflare Cron 每 5 分钟调用固定仓库 `sync.yml` 的 `workflow_dispatch`。它不接触 Bitget 凭据、交易数据或 Pages 内容，只持有一个仅限本仓库 `Actions: Read and write` 的 fine-grained GitHub token。
 - `sync.yml` 新增 `persist` 输入：快速运行每次抓取并直接发布 Pages，但不提交仓库；每小时一次持久化完整 `data/*.json`。原 GitHub 20 分钟 cron 保留并始终归档，作为 Cloudflare 故障时的独立兜底。
 - 新增 `data/version.json`；前端每分钟只检查小版本文件，版本变化才下载完整 `data.json`。版本探针失败时保留 5 分钟完整刷新兜底，且用单一 Promise 阻止多个刷新重叠。
-- 两个工作流的官方 Actions 全部固定到完整 commit SHA；checkout 不持久保存仓库凭据；npm 安装禁用生命周期脚本；仓库写令牌仅在归档提交步骤注入。
+- 两个工作流的官方 Actions 全部固定到完整 commit SHA；checkout 不持久保存仓库凭据；线上直接使用 Node 20 内置 `fetch`，不安装第三方 npm 依赖（`undici` 只在本机代理模式动态加载）；仓库写令牌仅在归档提交步骤注入。
 - 免费额度估算：Cloudflare 每天 288 次 Cron，远低于免费额度；GitHub 公共仓库标准 Actions 与 Pages 不收费，预计新增成本 **0 元/月**。
 
 ### 进度
@@ -24,8 +24,12 @@
 - [x] 扩充 `npm run verify`：覆盖版本一致性、刷新逻辑、固定 SHA 与调度器凭据边界
 - [x] 本地回归通过：`verify` 通过（90 笔整仓、2,214 个曲线事件、746 次平/减仓）；4 个 JS 文件语法通过；TOML 与 `git diff --check` 通过；实际浏览器渲染 6 卡/2 图/7 标签、区间切换正常、控制台零错误
 - [x] 安全扫描通过：用本地三项真实 Bitget 凭据只比较不打印，27 个待发布/已跟踪文件和全部 149 个历史提交均为 0 命中；`.env` 未跟踪且由 `.gitignore` 排除；常见 GitHub/AWS/私钥高风险模式 0 命中
-- [ ] Cloudflare Secret 与 Cron 实际部署
-- [ ] 推送 main、触发线上同步并验证 Pages 公共发布边界与刷新链路
+- [x] Cloudflare Worker `bitget-journal-scheduler` 已部署，Cron 为 `2-59/5 * * * *`；`GITHUB_ACTIONS_TOKEN` 仅以 Worker Secret 保存，GitHub token 仅限本仓库、权限仅 `Actions: Read and write`，2026-12-03 到期
+- [x] Worker 公网与预览 URL 已关闭（`workers_dev=false`、`preview_urls=false`）；旧 `workers.dev` 地址实测返回 404，Worker 只保留定时事件入口
+- [x] 真实 Cron 于 08:27:30 UTC 触发 run `33853527235`，抓取、Pages 部署均成功，`persist=false` 的归档提交步骤按设计跳过；run 于 08:34:27 UTC 完成
+- [x] 首轮发现 `npm ci` 为安装 1 个线上并不使用的代理依赖耗时 6 分 13 秒；已从 Actions 删除安装步骤并扩充自检断言，Bitget 抓取本身只用约 13 秒
+- [x] 令牌卫生：配置期间凡曾在一次性页面输出中出现过的临时 token 均立即撤销；最终 Secret 使用重新生成且未输出的 token，浏览器剪贴板与一次性页面均已清空
+- [ ] 推送本轮无依赖优化，再由真实 Cron 验证端到端耗时
 
 ---
 

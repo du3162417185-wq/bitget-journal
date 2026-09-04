@@ -80,7 +80,7 @@ assert(!app.includes('setInterval(load, 5 * 60 * 1000)'), 'app.js 仍在无条�
 /* 自动化安全边界：外部调度器只能触发固定工作流，Bitget 凭据只留在 GitHub Secrets。 */
 assert(syncWorkflow.includes("inputs.persist == true"), 'sync.yml 缺少快速刷新/长期归档分流');
 assert(syncWorkflow.includes('persist-credentials: false'), 'sync.yml checkout 仍持久保存仓库令牌');
-assert(syncWorkflow.includes('npm ci --ignore-scripts'), 'sync.yml 依赖安装未禁用生命周期脚本');
+assert(!/\bnpm\s+(?:ci|install)\b/.test(syncWorkflow), 'sync.yml 不应为仅本地代理使用的 undici 安装依赖');
 assert(!scheduler.match(/BITGET_(?:KEY|SECRET|PASSPHRASE)/), 'Cloudflare 调度器不得接触 Bitget 凭据');
 assert(scheduler.includes('/actions/workflows/sync.yml/dispatches'), '调度器未锁定 sync.yml');
 assert(scheduler.includes("ref: 'main'"), '调度器未锁定 main 分支');

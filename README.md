@@ -76,5 +76,5 @@ Bitget 的三项凭据仍然只在 GitHub Secrets 中，**不会交给 Cloudflar
 - API 密钥为**只读**权限：无交易、无提现能力；
 - 密钥只存在本地 `.env` 与 GitHub Secrets 中，页面与仓库中不出现任何密钥；
 - Cloudflare 调度令牌只允许触发本仓库 Actions，不能读取 Bitget 密钥或操作交易；
-- Actions 全部固定到完整 commit SHA，依赖安装禁用生命周期脚本，checkout 不持久保存写令牌；
+- Actions 全部固定到完整 commit SHA；线上不安装第三方 npm 依赖；checkout 不持久保存写令牌；
 - 若怀疑密钥泄露，随时到 Bitget 后台删除该 API 即可，不影响账户资金。

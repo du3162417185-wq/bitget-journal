@@ -53,7 +53,7 @@ Cloudflare Cron 每 5 分钟触发 GitHub Actions → `scripts/fetch.mjs` 从 Bi
 - 存放位置：本地 `D:\bitget-journal\.env`（`BITGET_KEY / BITGET_SECRET / BITGET_PASSPHRASE / BITGET_PROXY`）+ GitHub 仓库 Secrets（同前三项，Actions 用）。
 - **绝不能**把密钥写进任何入库文件（`.env` 已被 `.gitignore` 排除并验证）。
 - 轮换方法：Bitget 后台删旧建新 → 改 `.env` → `gh secret set BITGET_KEY -R du3162417185-wq/bitget-journal -b "新值"`（三个各来一次）。
-- Cloudflare 只有 `GITHUB_ACTIONS_TOKEN`：GitHub fine-grained token，仓库范围仅本项目，权限仅 `Actions: Read and write`，设到期时间；它只能触发工作流，不能读取 Actions Secrets，也不能访问 Bitget。不要把 token 写进 `wrangler.toml` 或任何文件。
+- Cloudflare 只有 `GITHUB_ACTIONS_TOKEN`：GitHub fine-grained token，仓库范围仅本项目，权限仅 `Actions: Read and write`，当前到期日 2026-12-03；它只能触发工作流，不能读取 Actions Secrets，也不能访问 Bitget。不要把 token 写进 `wrangler.toml` 或任何文件；到期前需在 GitHub 重建同权限 token 并替换 Worker Secret。
 
 ## 4. Bitget API 关键事实（血泪坑）
 
@@ -109,7 +109,7 @@ git -c http.proxy=http://127.0.0.1:7897 push
 - Pages 已启用 build_type=workflow；`configure-pages` 带 `enablement: true`。
 - Pages CDN 对 data.json 有缓存；前端先轮询 `version.json?t=分钟号`，发现变化后读取 `data.json?v=生成时间`，不会把 1MB 级完整数据每分钟重复下载。
 - 手动归档并部署：`gh workflow run sync.yml -R du3162417185-wq/bitget-journal -f persist=true`；仅快速部署用 `-f persist=false`（gh 命令需走本机代理）。
-- 两个工作流引用的官方 Actions 均固定到完整 commit SHA；checkout 不持久保存凭据，`npm ci --ignore-scripts` 禁止依赖生命周期脚本，仓库写令牌只在归档提交步骤注入。
+- 两个工作流引用的官方 Actions 均固定到完整 commit SHA；checkout 不持久保存凭据；线上不安装第三方 npm 依赖，直接使用 Node 20 内置 `fetch`，`undici` 仅供本机代理模式动态加载；仓库写令牌只在归档提交步骤注入。
 
 ## 8. 常见运维
 
@@ -124,6 +124,8 @@ git -c http.proxy=http://127.0.0.1:7897 push
 | 查工作流状态 | `gh run list -R du3162417185-wq/bitget-journal --limit 5` |
 | 查 5 分钟调度 | Cloudflare Dashboard → Workers & Pages → bitget-journal-scheduler → Triggers / Logs |
 | 国内打不开 | 已知问题（github.io 被墙）。预案：迁 Cloudflare Pages——repo 接入 CF Pages（build 无命令、输出根目录），定时同步改为 CF Workers Cron 或仍用 GitHub Actions push（CF 自动部署）；域名换成 pages.dev |
+
+Cloudflare Worker 只启用 Cron，`workers_dev` 与预览 URL 均关闭；不要为了“测试方便”重新打开公网路由。2026-09-04 首个真实 Cron run `33853527235` 已验证：Bitget 抓取与 Pages 部署成功，快速运行没有提交归档。
 
 ## 9. 当前数据基线（2026-08-27 18:29）
 

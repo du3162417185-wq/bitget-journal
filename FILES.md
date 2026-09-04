@@ -154,10 +154,10 @@ D:\bitget-journal\
 ## 五、GitHub Actions 工作流逐步说明
 
 ### sync.yml（Cloudflare 5 分钟触发；GitHub cron `*/20 * * * *` 兜底）
-checkout（不持久保存凭据）→ 装 Node 20 → `npm ci --ignore-scripts` → `node scripts/fetch.mjs`（Bitget 密钥只来自 GitHub Secrets）→ 按 `persist` 决定是否 commit：Cloudflare 每小时一次 `true`，其余快速运行 `false`；GitHub 原生 cron 和手动默认 `true` → 无论是否提交，都在同一运行内整理 `_site` 并部署本次最新快照。归档提交步骤才短暂注入 GitHub 写令牌。
+checkout（不持久保存凭据）→ 装 Node 20 → 直接运行 `node scripts/fetch.mjs`（使用 Node 内置 `fetch`，Bitget 密钥只来自 GitHub Secrets）→ 按 `persist` 决定是否 commit：Cloudflare 每小时一次 `true`，其余快速运行 `false`；GitHub 原生 cron 和手动默认 `true` → 无论是否提交，都在同一运行内整理 `_site` 并部署本次最新快照。线上不安装 npm 依赖；`undici` 只在本机配置代理时动态加载。归档提交步骤才短暂注入 GitHub 写令牌。
 
 ### scheduler（Cloudflare Workers Cron）
-cron `2-59/5 * * * *`，避开整点高峰，每小时 2/7/12…57 分触发。Worker 只向固定仓库、固定 `sync.yml`、固定 `main` 发 `workflow_dispatch`；UTC 每小时 17 分那次传 `persist=true`，其余传 `false`。仓库源码不含 token，实际值只存 Cloudflare Secret。Worker 不接收 HTTP 请求、不调用 Bitget、不读取交易数据。
+cron `2-59/5 * * * *`，避开整点高峰，每小时 2/7/12…57 分触发。Worker 只向固定仓库、固定 `sync.yml`、固定 `main` 发 `workflow_dispatch`；UTC 每小时 17 分那次传 `persist=true`，其余传 `false`。仓库源码不含 token，实际值只存 Cloudflare Secret。`workers_dev=false` 与 `preview_urls=false` 关闭公网/预览入口；Worker 不接收 HTTP 请求、不调用 Bitget、不读取交易数据。
 
 ### deploy.yml（手动 push 触发）
 main 分支任何 push 都触发 → 整理 `_site` → 发布 Pages。`_site` 只含公开前端、`data/*.json` 与 README/HANDOFF/DEVLOG/FILES；本机编辑器和开发脚本不会部署。
