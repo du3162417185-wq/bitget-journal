@@ -105,7 +105,7 @@ git -c http.proxy=http://127.0.0.1:7897 push
 
 - 仓库级 git 身份已配置（user.name=xixifusi）；全局没配，命令行临时身份不再需要。
 - 直接 push 会触发 `deploy.yml` 部署；`sync.yml` 每次运行都直接部署本次快照。`persist=false` 的快速运行不提交仓库，每小时 `persist=true` 一次以及 GitHub 原生 cron 会提交长期归档。
-- 两个工作流都会先整理 `_site`，仅发布前端、JSON 数据和四份说明文档；不会把 `admin.html`、本机脚本、node_modules 或其他开发文件发布到 Pages。
+- 两个工作流都会先整理 `_site`，仅发布前端、`data/*.json` 与 `README.md`；内部交接与运维文档（`HANDOFF.md`/`DEVLOG.md`/`FILES.md`）只留在仓库，以及 `admin.html`、本机脚本、node_modules 或其他开发文件，都不会发布到 Pages。
 - Pages 已启用 build_type=workflow；`configure-pages` 带 `enablement: true`。
 - Pages CDN 对 data.json 有缓存；前端先轮询 `version.json?t=分钟号`，发现变化后读取 `data.json?v=生成时间`，不会把 1MB 级完整数据每分钟重复下载。
 - 手动归档并部署：`gh workflow run sync.yml -R du3162417185-wq/bitget-journal -f persist=true`；仅快速部署用 `-f persist=false`（gh 命令需走本机代理）。
