@@ -28,6 +28,9 @@ assert(Array.isArray(data.stats?.daily), 'data.json 缺少 stats.daily');
 assert(Array.isArray(data.stats?.events), 'data.json 缺少 stats.events');
 assert(data.stats?.accounting?.method === 'fill-exec-pnl', '统计尚未切换到逐笔成交口径');
 assert(Array.isArray(data.financialRecords), 'data.json 缺少 financialRecords');
+/* 隐私边界：/account/settings 含账户 uid，公开归档里不得出现。 */
+assert(!('settings' in data), 'data.json 不应包含 settings（含公开的账户 uid）');
+assert(!JSON.stringify(data).includes('1361100082'), 'data.json 仍含账户 uid');
 const publicFinancialKeys = new Set(['id', 'type', 'symbol', 'coin', 'amount', 'ts']);
 for (const record of data.financialRecords) {
   assert(/(?:SETTLE_FEE|FUNDING).*USER_(?:IN|OUT)$/i.test(String(record.type || '')), `混入非资金费流水：${record.type}`);
@@ -119,6 +122,11 @@ assert(dispatchCalls.length === 2, 'Cloudflare 调度器未按预期发起两次
 assert(dispatchCalls[0].body.inputs.persist === 'true', '每小时 17 分触发未持久化归档');
 assert(dispatchCalls[1].body.inputs.persist === 'false', '普通 5 分钟触发不应提交归档');
 assert(dispatchCalls.every((call) => call.body.ref === 'main'), '调度器触发了非 main 分支');
+
+/* 发布边界：内部交接/日志文档只留在仓库，不进 Pages 产物。 */
+for (const workflow of [syncWorkflow, deployWorkflow]) {
+  assert(!/HANDOFF\.md|DEVLOG\.md|FILES\.md/.test(workflow), '工作流仍在把内部文档发布到 Pages');
+}
 
 console.log([
   '[verify] 通过',

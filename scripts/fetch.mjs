@@ -264,7 +264,6 @@ async function main() {
 
   const data = {
     meta: { generatedAt: new Date().toISOString(), generatedAtMs: Date.now(), errors: [] },
-    settings: null,
     accountAssets: null,
     fundingAssets: null,
     positions: [],
@@ -279,7 +278,7 @@ async function main() {
     equityHistory: [],
   };
 
-  try { data.settings = await get('/api/v3/account/settings'); } catch (e) { errors.push('settings: ' + e.message); }
+  /* /api/v3/account/settings 含账户 uid 等身份字段，公开站不抓取、不落盘。 */
   try { data.accountAssets = await get('/api/v3/account/assets'); } catch (e) { errors.push('assets: ' + e.message); }
   try { data.fundingAssets = await get('/api/v3/account/funding-assets'); } catch { /* 尽力而为 */ }
 

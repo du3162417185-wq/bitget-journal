@@ -470,7 +470,13 @@ function exportCSV(kind) {
     rows = [['时间', '类型', '账户', '币种', '数量', '状态', '交易ID']]
       .concat((state.data.transfers || []).map((x) => [tFull(x.time), x.type, x.account, x.coin, x.amount, x.status, x.txid]));
   }
-  const csv = '\ufeff' + rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  /* 单元格转义：先中和 Excel/WPS 公式注入（= + - @ 开头），再按 CSV 规则加引号。 */
+  const csvCell = (c) => {
+    let s = String(c ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  const csv = '\ufeff' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = `bitget-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
