@@ -158,14 +158,31 @@ function isTrustedLocalRequest(req) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', (chunk) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      req.removeListener('data', onData);
+      req.removeListener('end', onEnd);
+      req.removeListener('error', onError);
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error('请求超时')), 5000);
+    const onData = (chunk) => {
       body += chunk;
-      if (body.length > 20_000) reject(new Error('请求内容过大'));
-    });
-    req.on('end', () => resolve(body));
-    req.on('error', reject);
+      if (body.length > 20_000) finish(reject, new Error('请求内容过大'));
+    };
+    const onEnd = () => finish(resolve, body);
+    const onError = (error) => finish(reject, error);
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
   });
 }
+
+/* git 操作会阻塞事件循环，用互斥锁避免本机并发请求把服务卡住。 */
+let saveInFlight = false;
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -180,8 +197,14 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (url.pathname === '/api/save') {
+        if (saveInFlight) { json(res, 429, { ok: false, message: '上一个保存仍在进行，请稍候重试' }); return; }
         const body = JSON.parse(await readBody(req));
-        json(res, 200, saveReview(body));
+        saveInFlight = true;
+        try {
+          json(res, 200, saveReview(body));
+        } finally {
+          saveInFlight = false;
+        }
         return;
       }
       json(res, 404, { ok: false, message: '接口不存在' });
