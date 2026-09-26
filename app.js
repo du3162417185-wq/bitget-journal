@@ -524,9 +524,23 @@ if (window.REPO_URL) {
   a.href = window.REPO_URL; a.hidden = false;
 }
 
-load().catch((error) => {
-  console.error('[load]', error);
-  $('#syncTime').textContent = '加载失败，请刷新重试';
+/* 首次加载弱网容错：代理节点对大文件偶发截断/断流，失败自动重试 3 次。 */
+async function loadWithRetry(attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await load();
+      return;
+    } catch (error) {
+      console.error(`[load] 第 ${i}/${attempts} 次失败`, error);
+      if (i === attempts) throw error;
+      $('#syncTime').textContent = `数据加载失败，正在重试（${i + 1}/${attempts}）…`;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  }
+}
+
+loadWithRetry().catch(() => {
+  $('#syncTime').textContent = '加载失败，保持页面打开会每分钟自动重试';
 });
 setInterval(checkForUpdate, 60 * 1000);
 window.addEventListener('focus', checkForUpdate);
