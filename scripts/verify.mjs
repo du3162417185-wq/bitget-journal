@@ -28,9 +28,23 @@ assert(Array.isArray(data.stats?.daily), 'data.json 缺少 stats.daily');
 assert(Array.isArray(data.stats?.events), 'data.json 缺少 stats.events');
 assert(data.stats?.accounting?.method === 'fill-exec-pnl', '统计尚未切换到逐笔成交口径');
 assert(Array.isArray(data.financialRecords), 'data.json 缺少 financialRecords');
-/* 隐私边界：/account/settings 含账户 uid，公开归档里不得出现。 */
+/* 隐私边界：/account/settings 含账户 uid，公开归档里不得出现。
+ * 检查用结构性字段名而非 uid 字面量（本文件在公开仓库里，不能泄露 uid）；
+ * 如需字面量核对，通过环境变量 PRIVATE_ACCOUNT_UID 传入。 */
 assert(!('settings' in data), 'data.json 不应包含 settings（含公开的账户 uid）');
-assert(!JSON.stringify(data).includes('1361100082'), 'data.json 仍含账户 uid');
+const uidLikeKeys = new Set(['uid', 'userId', 'user_id', 'accountId']);
+const uidFound = [];
+(function walkUidKeys(obj) {
+  if (!obj || typeof obj !== 'object') return;
+  for (const [key, value] of Object.entries(obj)) {
+    if (uidLikeKeys.has(key)) uidFound.push(key);
+    else if (value && typeof value === 'object') walkUidKeys(value);
+  }
+})(data);
+assert(uidFound.length === 0, `data.json 含账户标识字段：${uidFound.join(',')}`);
+if (process.env.PRIVATE_ACCOUNT_UID) {
+  assert(!JSON.stringify(data).includes(process.env.PRIVATE_ACCOUNT_UID), 'data.json 仍含账户 uid');
+}
 const publicFinancialKeys = new Set(['id', 'type', 'symbol', 'coin', 'amount', 'ts']);
 for (const record of data.financialRecords) {
   assert(/(?:SETTLE_FEE|FUNDING).*USER_(?:IN|OUT)$/i.test(String(record.type || '')), `混入非资金费流水：${record.type}`);

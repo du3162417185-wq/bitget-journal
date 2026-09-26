@@ -54,7 +54,9 @@ function assertMainBranch() {
 }
 
 function assertCleanWorktree() {
-  const dirty = git(['status', '--porcelain', '--untracked-files=all']).trim();
+  /* 只看已跟踪文件的改动；本地长期存在与项目无关的未跟踪文件（.tmp、bgtape-* 等），
+   * 它们不会进入 pull --rebase，不应阻断点评工具的自动同步。 */
+  const dirty = git(['status', '--porcelain', '--untracked-files=no']).trim();
   if (dirty) {
     const files = dirty.split(/\r?\n/).slice(0, 5).join('；');
     throw new Error(`项目存在未提交改动，已停止自动同步：${files}`);

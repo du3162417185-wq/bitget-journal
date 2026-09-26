@@ -297,6 +297,43 @@ async function main() {
   const apiFills = await getAll('/api/v3/trade/fills', { category: PT }).catch((e) => { errors.push('fills: ' + e.message); return []; });
   const apiSpotFills = await getAll('/api/v3/trade/fills', { category: 'SPOT' }, 40).catch(() => []);
   const apiOrders = await getAll('/api/v3/trade/history-orders', { category: PT }).catch((e) => { errors.push('orders: ' + e.message); return []; });
+
+  /* 充提记录：导入文件止于经典账户导出（2026-08-19），UTA 时期从这里增量补充。
+   * 每次固定回扫近 90 天（窗口 ≤29 天，整月 31 天窗口会被 400 拒绝）；
+   * 归档按去重键长期保留，重扫只做自愈，成本为每端点最多 4 个窗口。 */
+  const transferWalkStart = Date.now() - 90 * DAY;
+  const getTransferRecords = async (endpoint) => {
+    const out = [];
+    let end = Date.now();
+    while (end > transferWalkStart) {
+      const start = Math.max(transferWalkStart, end - 29 * DAY + 1);
+      try {
+        out.push(...await getAll(endpoint, { startTime: String(start), endTime: String(end) }));
+      } catch (e) {
+        errors.push(`${endpoint}: ${e.message}`);
+        break;
+      }
+      end = start - 1;
+      if (end > transferWalkStart) await sleep(150);
+    }
+    return out;
+  };
+  const normalizeTransfer = (x, kind) => ({
+    time: String(Number(x.createdTime || x.ts || 0)),
+    type: kind,
+    account: x.chain ? `统一账户 · ${x.chain}` : '统一账户',
+    chain: x.chain || '',
+    coin: x.coin || '',
+    amount: String(x.size ?? x.amount ?? ''),
+    txid: x.txid || x.recordId || '',
+    status: /success/i.test(String(x.status || '')) ? 'Successful' : String(x.status || ''),
+  });
+  const transferKey = (x) => `${x.type}|${x.coin}|${Number(x.amount)}|${Math.floor(Number(x.time) / 1000)}`;
+  const apiTransfers = [
+    ...(await getTransferRecords('/api/v3/account/deposit-records')).map((x) => normalizeTransfer(x, 'Deposit')),
+    ...(await getTransferRecords('/api/v3/account/withdrawal-records')).map((x) => normalizeTransfer(x, 'Withdraw')),
+  ];
+
   let financialCoverageStart = Number(prev?.meta?.financialRecordsFrom || 0) || null;
   let apiFinancialRecords = [];
   try {
@@ -313,6 +350,9 @@ async function main() {
   const basePositions = mergePositions(prev?.historyPositions || [], imp.positions, apiHistPos);
   const gapSynth = synthesizeGapPositions(mergedFills, basePositions);
   data.historyPositions = mergePositions(basePositions, gapSynth);
+  const transferMap = new Map();
+  for (const x of [...(imp.transfers || []), ...(prev?.transfers || []), ...apiTransfers]) transferMap.set(transferKey(x), x);
+  data.transfers = [...transferMap.values()];
   data.orders = mergeOrders(prev?.orders || [], imp.orders, apiOrders);
   data.fills = mergedFills;
   data.financialRecords = mergeFinancialRecords(prev?.financialRecords || [], apiFinancialRecords)
@@ -320,7 +360,7 @@ async function main() {
     .map(publicFundingRecord)
     .sort((a, b) => Number(a.ts) - Number(b.ts));
   if (financialCoverageStart) data.meta.financialRecordsFrom = financialCoverageStart;
-  log('合并后：平仓', data.historyPositions.length, `（含导入 ${imp.positions.length}、归集 ${gapSynth.length}）· 成交`, data.fills.length, '· 委托', data.orders.length);
+  log('合并后：平仓', data.historyPositions.length, `（含导入 ${imp.positions.length}、归集 ${gapSynth.length}）· 成交`, data.fills.length, '· 委托', data.orders.length, '· 充提', data.transfers.length, `（API 新增 ${apiTransfers.length}）`);
 
   try {
     const tks = toList(await get(`/api/v3/market/tickers?category=${PT}`));
@@ -410,7 +450,10 @@ async function main() {
   let eqHist = readJson('equity-history.json', []);
   if (!eqHist.length || Date.now() - eqHist[eqHist.length - 1].t > 5 * 60 * 1000) {
     eqHist.push({ t: Date.now(), equity: usdtEquity });
-    if (eqHist.length > 5000) eqHist = eqHist.slice(-5000);
+    if (eqHist.length > 4000) {
+      /* 触顶按步长抽稀而不是丢最老记录：时间跨度永久保留，体积有界。 */
+      eqHist = eqHist.filter((_, i) => i % 2 === 0);
+    }
     fs.writeFileSync(eqFile, JSON.stringify(eqHist));
   }
   data.equityHistory = eqHist;

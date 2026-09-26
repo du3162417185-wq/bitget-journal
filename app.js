@@ -434,7 +434,15 @@ function renderTransfers() {
   const head = `<thead><tr><th>时间</th><th>类型</th><th>账户</th><th>币种</th><th>数量</th><th>状态</th><th>交易ID</th></tr></thead>`;
   const rows = list.map((x) => {
     const isWithdraw = /withdraw/i.test(x.type);
-    const tx = x.txid ? `<a href="https://etherscan.io/tx/${esc(x.txid)}" target="_blank" rel="noopener" title="${esc(x.txid)}">${esc(x.txid.slice(0, 10))}…</a>` : '–';
+    /* 链感知浏览器链接：EVM 按链选站，非 EVM 哈希（如 Aptos 内部单号）只展示不加链接。 */
+    const tx = String(x.txid || '');
+    let txCell = '–';
+    if (/^0x[0-9a-fA-F]+$/.test(tx)) {
+      const base = /bep20/i.test(x.chain || '') ? 'https://bscscan.com/tx/' : 'https://etherscan.io/tx/';
+      txCell = `<a href="${base}${esc(tx)}" target="_blank" rel="noopener" title="${esc(tx)}">${esc(tx.slice(0, 10))}…</a>`;
+    } else if (tx) {
+      txCell = `<span class="dim" title="${esc(tx)}">${esc(tx.slice(0, 10))}…</span>`;
+    }
     return `<tr>
       <td>${t(x.time)}</td>
       <td class="${isWithdraw ? 'neg' : 'pos'}">${isWithdraw ? '提现' : '充值'}</td>
@@ -442,7 +450,7 @@ function renderTransfers() {
       <td><b>${esc(x.coin)}</b></td>
       <td class="num">${fmt(x.amount, 4)}</td>
       <td class="dim">${esc(x.status || '')}</td>
-      <td class="num">${tx}</td>
+      <td class="num">${txCell}</td>
     </tr>`;
   }).join('');
   $('#transfersTable').innerHTML = head + `<tbody>${rows || '<tr><td colspan="7" class="empty">暂无记录</td></tr>'}</tbody>`;
