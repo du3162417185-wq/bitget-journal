@@ -22,9 +22,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    # 不声明 environment：github-pages 环境未配置任何审批人，
+    # 一旦 deployment 卡在“等待审批”（GitHub 偶发竞态）将永远无人可批，
+    # 并以 concurrency 阻塞全部后续同步。deploy-pages 本身不依赖该声明。
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
