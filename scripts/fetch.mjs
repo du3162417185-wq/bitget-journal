@@ -298,25 +298,33 @@ async function main() {
   const apiSpotFills = await getAll('/api/v3/trade/fills', { category: 'SPOT' }, 40).catch(() => []);
   const apiOrders = await getAll('/api/v3/trade/history-orders', { category: PT }).catch((e) => { errors.push('orders: ' + e.message); return []; });
 
-  /* 充提记录：导入文件止于经典账户导出（2026-08-19），UTA 时期从这里增量补充。
-   * 每次固定回扫近 90 天（窗口 ≤29 天，整月 31 天窗口会被 400 拒绝）；
-   * 归档按去重键长期保留，重扫只做自愈，成本为每端点最多 4 个窗口。 */
-  const transferWalkStart = Date.now() - 90 * DAY;
+  /* 充提记录：导入文件止于经典账户导出（2026-08-19），API 增量补充其余。
+   * 窗口 ≤29 天（整月 31 天窗口会被 400 拒绝）；常规回扫近 90 天；
+   * 首次运行（meta.transfersCoveredFrom 未建立）一次性深扫到 TRANSFER_FLOOR
+   * （充提稀疏，不能按空窗口提前停），之后只做 90 天自愈。 */
+  const TRANSFER_FLOOR = Date.parse('2025-01-01T00:00:00+08:00');
+  const transfersCoveredFrom = Number(prev?.meta?.transfersCoveredFrom || 0);
+  const deepScan = !transfersCoveredFrom;
   const getTransferRecords = async (endpoint) => {
+    const floor = deepScan ? Math.min(TRANSFER_FLOOR, Date.now() - 90 * DAY) : Math.max(transfersCoveredFrom, Date.now() - 90 * DAY);
     const out = [];
     let end = Date.now();
-    while (end > transferWalkStart) {
-      const start = Math.max(transferWalkStart, end - 29 * DAY + 1);
+    let earliestScanned = end;
+    while (end > floor) {
+      const start = Math.max(floor, end - 29 * DAY + 1);
+      let rows = [];
       try {
-        out.push(...await getAll(endpoint, { startTime: String(start), endTime: String(end) }));
+        rows = await getAll(endpoint, { startTime: String(start), endTime: String(end) });
       } catch (e) {
         errors.push(`${endpoint}: ${e.message}`);
         break;
       }
+      out.push(...rows);
+      earliestScanned = start;
       end = start - 1;
-      if (end > transferWalkStart) await sleep(150);
+      if (end > floor) await sleep(150);
     }
-    return out;
+    return { rows: out, earliestScanned };
   };
   const normalizeTransfer = (x, kind) => ({
     time: String(Number(x.createdTime || x.ts || 0)),
@@ -329,10 +337,13 @@ async function main() {
     status: /success/i.test(String(x.status || '')) ? 'Successful' : String(x.status || ''),
   });
   const transferKey = (x) => `${x.type}|${x.coin}|${Number(x.amount)}|${Math.floor(Number(x.time) / 1000)}`;
+  const depositScan = await getTransferRecords('/api/v3/account/deposit-records');
+  const withdrawScan = await getTransferRecords('/api/v3/account/withdrawal-records');
   const apiTransfers = [
-    ...(await getTransferRecords('/api/v3/account/deposit-records')).map((x) => normalizeTransfer(x, 'Deposit')),
-    ...(await getTransferRecords('/api/v3/account/withdrawal-records')).map((x) => normalizeTransfer(x, 'Withdraw')),
+    ...depositScan.rows.map((x) => normalizeTransfer(x, 'Deposit')),
+    ...withdrawScan.rows.map((x) => normalizeTransfer(x, 'Withdraw')),
   ];
+  data.meta.transfersCoveredFrom = Math.min(depositScan.earliestScanned, withdrawScan.earliestScanned);
 
   let financialCoverageStart = Number(prev?.meta?.financialRecordsFrom || 0) || null;
   let apiFinancialRecords = [];
