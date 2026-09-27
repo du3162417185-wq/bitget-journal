@@ -84,9 +84,7 @@ async function get(reqPath) {
   return j.data;
 }
 
-const toList = (d) => (Array.isArray(d) ? d : d?.list || d?.rows || []);
-
-async function getAll(basePath, extra = {}, maxPages = 100) {
+const toList = (d) => (Array.isArray(d) ? d : d?.list || d?.rows || []);async function getAll(basePath, extra = {}, maxPages = 100) {
   const base = new URLSearchParams(extra);
   let cursor = null;
   let prevFirst = null;
@@ -114,15 +112,6 @@ async function getAll(basePath, extra = {}, maxPages = 100) {
     await sleep(150);
   }
   return out;
-}
-
-async function tryGetPaths(paths) {
-  let lastErr;
-  for (const p of paths) {
-    try { return await get(p); }
-    catch (e) { lastErr = e; }
-  }
-  throw lastErr;
 }
 
 /* ---------------- 归档合并 ---------------- */
@@ -219,7 +208,9 @@ function synthesizeGapPositions(allFills, knownPositions) {
 }
 
 /* ---------------- 主流程 ---------------- */
-const PT = 'USDT-FUTURES';
+/* 覆盖 USDT 本位与 USDC 本位合约（如 BTCPERP/ETHPERP）；COIN-FUTURES 经查该账户无持仓无历史。
+ * 注意 COIN-FUTURES 若启用，其 execPnl 以币计价，不能直接并入 USDT/USDC 账本，故不纳入。 */
+const FUT_CATEGORIES = ['USDT-FUTURES', 'USDC-FUTURES'];
 const DAY = 864e5;
 const isFundingRecord = (r) => /(?:SETTLE_FEE|FUNDING).*USER_(?:IN|OUT)$/i.test(String(r.type || ''));
 const publicFundingRecord = (r) => ({
@@ -283,20 +274,28 @@ async function main() {
   try { data.fundingAssets = await get('/api/v3/account/funding-assets'); } catch { /* 尽力而为 */ }
 
   try {
-    data.positions = toList(await tryGetPaths([
-      '/api/v3/position/current-position',
-      `/api/v3/position/current-position?category=${PT}`,
-    ]));
+    const posParts = await Promise.all(FUT_CATEGORIES.map(async (cat) => {
+      try { return toList(await get(`/api/v3/position/current-position?category=${cat}`)); }
+      catch (e) { errors.push(`positions[${cat}]: ` + e.message); return []; }
+    }));
+    data.positions = posParts.flat();
   } catch (e) { errors.push('positions: ' + e.message); }
   log('当前持仓:', data.positions.length);
 
-  try { data.openOrders = await getAll('/api/v3/trade/unfilled-orders', { category: PT }); }
-  catch (e) { errors.push('openOrders: ' + e.message); }
+  data.openOrders = [];
+  for (const cat of FUT_CATEGORIES) {
+    data.openOrders.push(...await getAll('/api/v3/trade/unfilled-orders', { category: cat }).catch((e) => { errors.push(`openOrders[${cat}]: ` + e.message); return []; }));
+  }
 
-  const apiHistPos = await getAll('/api/v3/position/history-position', { category: PT }).catch((e) => { errors.push('historyPositions: ' + e.message); return []; });
-  const apiFills = await getAll('/api/v3/trade/fills', { category: PT }).catch((e) => { errors.push('fills: ' + e.message); return []; });
+  const apiHistPos = [];
+  const apiFills = [];
+  const apiOrders = [];
+  for (const cat of FUT_CATEGORIES) {
+    apiHistPos.push(...await getAll('/api/v3/position/history-position', { category: cat }).catch((e) => { errors.push(`historyPositions[${cat}]: ` + e.message); return []; }));
+    apiFills.push(...await getAll('/api/v3/trade/fills', { category: cat }).catch((e) => { errors.push(`fills[${cat}]: ` + e.message); return []; }));
+    apiOrders.push(...await getAll('/api/v3/trade/history-orders', { category: cat }).catch((e) => { errors.push(`orders[${cat}]: ` + e.message); return []; }));
+  }
   const apiSpotFills = await getAll('/api/v3/trade/fills', { category: 'SPOT' }, 40).catch(() => []);
-  const apiOrders = await getAll('/api/v3/trade/history-orders', { category: PT }).catch((e) => { errors.push('orders: ' + e.message); return []; });
 
   /* 充提记录：导入文件止于经典账户导出（2026-08-19），API 增量补充其余。
    * 窗口 ≤29 天（整月 31 天窗口会被 400 拒绝）；常规回扫近 90 天；
@@ -347,13 +346,20 @@ async function main() {
 
   let financialCoverageStart = Number(prev?.meta?.financialRecordsFrom || 0) || null;
   let apiFinancialRecords = [];
-  try {
-    const financial = await getFinancialRecords(PT);
-    apiFinancialRecords = financial.records;
-    financialCoverageStart = financialCoverageStart
-      ? Math.min(financialCoverageStart, financial.coverageStart)
-      : financial.coverageStart;
-  } catch (e) { errors.push('financialRecords: ' + e.message); }
+  {
+    const financials = [];
+    for (const cat of FUT_CATEGORIES) {
+      try { financials.push(await getFinancialRecords(cat)); }
+      catch (e) { errors.push(`financialRecords[${cat}]: ` + e.message); financials.push({ records: [], coverageStart: 0 }); }
+    }
+    apiFinancialRecords = financials.flatMap((f) => f.records);
+    const starts = financials.map((f) => f.coverageStart).filter(Boolean);
+    if (starts.length) {
+      financialCoverageStart = financialCoverageStart
+        ? Math.min(financialCoverageStart, ...starts)
+        : Math.min(...starts);
+    }
+  }
   log('API：平仓', apiHistPos.length, '· 成交', apiFills.length + apiSpotFills.length, '· 委托', apiOrders.length, '· 资金费流水', apiFinancialRecords.length);
 
   /* ---------- 归档合并（先归集缺口，再三方合并） ---------- */
@@ -373,19 +379,22 @@ async function main() {
   if (financialCoverageStart) data.meta.financialRecordsFrom = financialCoverageStart;
   log('合并后：平仓', data.historyPositions.length, `（含导入 ${imp.positions.length}、归集 ${gapSynth.length}）· 成交`, data.fills.length, '· 委托', data.orders.length, '· 充提', data.transfers.length, `（API 新增 ${apiTransfers.length}）`);
 
-  try {
-    const tks = toList(await get(`/api/v3/market/tickers?category=${PT}`));
-    for (const t of tks) data.tickers[t.symbol] = { lastPr: t.lastPr, bidPr: t.bidPr, askPr: t.askPr };
-  } catch (e) { errors.push('tickers: ' + e.message); }
+  for (const cat of FUT_CATEGORIES) {
+    try {
+      const tks = toList(await get(`/api/v3/market/tickers?category=${cat}`));
+      for (const t of tks) data.tickers[t.symbol] = { lastPr: t.lastPr, bidPr: t.bidPr, askPr: t.askPr };
+    } catch (e) { errors.push(`tickers[${cat}]: ` + e.message); }
+  }
 
   /* ---------------- 统计（逐笔成交日口径） ----------------
    * history-position 只在仓位彻底归零时返回整段生命周期盈亏，会把数月的多次减仓
    * 全部挤到最后一天。这里改用 fills.execPnl：每次平仓/减仓在真实成交日入账；
    * 所有合约成交手续费也按成交日扣除，资金费按 financial-records 的真实发生日计入。
    */
-  const usdtFee = (f) => {
-    if (Array.isArray(f.feeDetail)) return f.feeDetail.filter((x) => (x.feeCoin || 'USDT') === 'USDT').reduce((s, x) => s + Number(x.fee || 0), 0);
-    return (f.feeCoin || 'USDT') === 'USDT' ? Number(f.fee || 0) : 0;
+  /* USDT 与 USDC 均为 1 美元锚定稳定币，手续费/资金费按同值并入美元账本。 */
+  const usdFee = (f) => {
+    if (Array.isArray(f.feeDetail)) return f.feeDetail.filter((x) => ['USDT', 'USDC'].includes(x.feeCoin || 'USDT')).reduce((s, x) => s + Number(x.fee || 0), 0);
+    return ['USDT', 'USDC'].includes(f.feeCoin || 'USDT') ? Number(f.fee || 0) : 0;
   };
   const isCloseFill = (f) => {
     const side = String(f.tradeSide || '').toLowerCase();
@@ -406,7 +415,7 @@ async function main() {
   for (const f of futuresFills) {
     const close = isCloseFill(f);
     const pnlValue = close ? Number(f.execPnl || 0) : 0;
-    const feeValue = usdtFee(f);
+    const feeValue = usdFee(f);
     if (close || feeValue) {
       events.push({
         t: Number(f.createdTime),
@@ -425,7 +434,7 @@ async function main() {
   }
 
   const actualFunding = data.financialRecords
-    .filter((r) => (r.coin || 'USDT') === 'USDT' && Number(r.ts) > 0 && isFundingRecord(r));
+    .filter((r) => ['USDT', 'USDC'].includes(r.coin || 'USDT') && Number(r.ts) > 0 && isFundingRecord(r));
   for (const r of actualFunding) {
     events.push({ t: Number(r.ts), net: round(fundingAmount(r), 8), kind: 'funding' });
   }
@@ -450,7 +459,7 @@ async function main() {
   }
   const daily = [...dayMap.entries()].map(([d, value]) => ({ d, pnl: round(value, 2) })).sort((a, b) => a.d.localeCompare(b.d));
 
-  const fees = round(data.fills.reduce((s, f) => s + usdtFee(f), 0), 2);
+  const fees = round(data.fills.reduce((s, f) => s + usdFee(f), 0), 2);
   const funding = round(events.filter((e) => e.kind === 'funding' || e.kind === 'legacy-funding')
     .reduce((s, e) => s + e.net, 0), 2);
   const partialCloses = events.filter((e) => e.kind === 'close' || e.kind === 'legacy-close');

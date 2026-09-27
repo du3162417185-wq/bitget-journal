@@ -126,7 +126,7 @@ function renderOverview() {
     { k: '逐笔净已实现盈亏', v: pnl(cs.net), cls: cls(cs.net), hint: `${rangeLabel} ${cs.count} 次平/减仓成交 · 按发生日计`,
       select: `<select id="cardRange" class="range-select">${RANGES.map(([v, l]) => `<option value="${v}" ${v === state.cardRange ? 'selected' : ''}>${l}</option>`).join('')}</select>` },
     { k: '胜率', v: stats.winRate == null ? '–' : stats.winRate + '%', hint: '按整仓结束后的净盈亏计（全程）' },
-    { k: '累计手续费', v: fmt(stats.fees), hint: '全部留档成交（USDT 计价）' },
+    { k: '累计手续费', v: fmt(stats.fees), hint: '全部留档成交（USDT/USDC 计价）' },
     { k: '资金费收支', v: pnl(stats.funding), cls: cls(stats.funding), hint: '按实际发生日；早期流水按历史记录补录' },
   ];
   $('#cards').innerHTML = cards.map((x) => `
