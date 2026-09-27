@@ -58,6 +58,7 @@ async function load(cacheKey = Date.now()) {
     } catch (error) {
       console.warn('[load] 主源加载失败，回退 jsDelivr 镜像:', error);
       nextData = await fetchJson(`${DATA_MIRROR}data.json?v=${key}`);
+      nextReviews = await fetchJson(`${DATA_MIRROR}reviews.json?v=${key}`).catch(() => ({}));
     }
     state.data = nextData;
     state.reviews = nextReviews;
@@ -445,11 +446,13 @@ function renderTransfers() {
   const head = `<thead><tr><th>时间</th><th>类型</th><th>账户</th><th>币种</th><th>数量</th><th>状态</th><th>交易ID</th></tr></thead>`;
   const rows = list.map((x) => {
     const isWithdraw = /withdraw/i.test(x.type);
-    /* 链感知浏览器链接：EVM 按链选站，非 EVM 哈希（如 Aptos 内部单号）只展示不加链接。 */
+    /* 链感知浏览器链接：按 chain 字段选浏览器；非 EVM 链（Aptos）与内部单号只展示不加链接。 */
     const tx = String(x.txid || '');
+    const chainName = String(x.chain || '').toUpperCase();
+    const EXPLORERS = { ERC20: 'https://etherscan.io/tx/', BEP20: 'https://bscscan.com/tx/', BASE: 'https://basescan.org/tx/', ARBITRUMONE: 'https://arbiscan.io/tx/' };
     let txCell = '–';
-    if (/^0x[0-9a-fA-F]+$/.test(tx)) {
-      const base = /bep20/i.test(x.chain || '') ? 'https://bscscan.com/tx/' : 'https://etherscan.io/tx/';
+    if (chainName !== 'APTOS' && /^0x[0-9a-fA-F]+$/.test(tx)) {
+      const base = EXPLORERS[chainName] || 'https://etherscan.io/tx/';
       txCell = `<a href="${base}${esc(tx)}" target="_blank" rel="noopener" title="${esc(tx)}">${esc(tx.slice(0, 10))}…</a>`;
     } else if (tx) {
       txCell = `<span class="dim" title="${esc(tx)}">${esc(tx.slice(0, 10))}…</span>`;
