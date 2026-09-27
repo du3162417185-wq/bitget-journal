@@ -36,18 +36,29 @@ let loadPromise = null;
 let lastFallbackLoadAt = 0;
 
 /* ---------- 数据加载 ---------- */
+/* 主源是本站 GitHub Pages；github.io 在部分地区/网络下间歇不可达，
+ * 加载失败自动回退 jsDelivr 镜像（内容取自 git 归档，最多滞后约 1 小时）。 */
+const DATA_MIRROR = 'https://cdn.jsdelivr.net/gh/du3162417185-wq/bitget-journal@main/data/';
+
+async function fetchJson(url, timeoutMs = 15000) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 async function load(cacheKey = Date.now()) {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
     const key = encodeURIComponent(String(cacheKey));
-    const [r, rr] = await Promise.all([
-      fetch(`data/data.json?v=${key}`),
-      fetch(`data/reviews.json?v=${key}`).catch(() => null),
-    ]);
-    if (!r.ok) throw new Error(`data.json HTTP ${r.status}`);
-    const nextData = await r.json();
+    let nextData;
     let nextReviews = {};
-    try { nextReviews = rr && rr.ok ? await rr.json() : {}; } catch { /* 复盘损坏不影响交易数据 */ }
+    try {
+      nextData = await fetchJson(`data/data.json?v=${key}`);
+      nextReviews = await fetchJson(`data/reviews.json?v=${key}`).catch(() => ({}));
+    } catch (error) {
+      console.warn('[load] 主源加载失败，回退 jsDelivr 镜像:', error);
+      nextData = await fetchJson(`${DATA_MIRROR}data.json?v=${key}`);
+    }
     state.data = nextData;
     state.reviews = nextReviews;
     loadedVersion = Number(nextData?.meta?.generatedAtMs || cacheKey || Date.now());
