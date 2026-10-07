@@ -19,9 +19,12 @@
         <div class="sub">三年之约：2.7w → 100w（2026–2029）· 每笔平仓，如实记录</div>
       </div>
     </div>
-    <div class="sync-badge" title="数据全部来自 Bitget 官方只读 API，自动同步，非手工填写">
-      <span class="dot"></span> Bitget 只读 API 自动同步
-      <span class="sync-time">更新于 <b id="syncTime">–</b></span>
+    <div class="hero-right">
+      <div class="sync-badge" title="数据全部来自 Bitget 官方只读 API，自动同步，非手工填写">
+        <span class="dot"></span> Bitget 只读 API 自动同步
+        <span class="sync-time">更新于 <b id="syncTime">–</b></span>
+      </div>
+      <a class="repo-badge" href="https://github.com/du3162417185-wq/bitget-journal" target="_blank" rel="noopener" title="公开仓库：每次数据变动都有提交记录，可逐条比对">GitHub 数据仓库 ↗</a>
     </div>
   </div>
 </header>
@@ -158,7 +161,8 @@
       <ul>
         <li>全部数据通过 <b>Bitget 官方 API（统一交易账户 v3）</b>自动抓取，<b>非手工填写</b>；</li>
         <li>API 密钥为<b>只读权限</b>——无交易、无提现权限，仅能查询；</li>
-        <li>数据由程序定时同步，每次变动都在 GitHub 仓库留有提交记录，可追溯、无法悄悄篡改；</li>
+        <li>程序、数据与这份页面全部放在公开仓库：<a href="https://github.com/du3162417185-wq/bitget-journal" target="_blank" rel="noopener">github.com/du3162417185-wq/bitget-journal</a>　·　<a href="https://github.com/du3162417185-wq/bitget-journal/commits/main" target="_blank" rel="noopener">查看全部提交历史 →</a></li>
+        <li>每次同步都会留下带时间的提交记录，可直接逐条比对 <code>data/data.json</code> 的改动，看有没有事后修饰；<b>说明</b>：公开仓库提供的是可核对的记录，技术上仓库所有者仍可改写历史，请把它与 Bitget App 的实盘数据互相印证；</li>
         <li>页面上的每一个数字，都可以对照 Bitget App 核验。</li>
       </ul>
 
@@ -199,7 +203,8 @@
     🪨 Successful西西弗斯 | 交易日记 · 由 Bitget 只读 API 驱动 · 数据更新与修改全程留痕
     <div class="foot-links">
       <a href="https://x.com/XiaoHan_aw" target="_blank" rel="noopener">X @XiaoHan_aw</a>
-      <a id="repoLink" href="#" target="_blank" rel="noopener" hidden>数据仓库（GitHub）</a>
+      <a id="repoLink" href="https://github.com/du3162417185-wq/bitget-journal" target="_blank" rel="noopener">数据仓库（GitHub）</a>
+      <a href="https://github.com/du3162417185-wq/bitget-journal/commits/main" target="_blank" rel="noopener">提交历史</a>
     </div>
   </div>
 </footer>

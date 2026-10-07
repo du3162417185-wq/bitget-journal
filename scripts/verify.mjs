@@ -108,6 +108,10 @@ for (const [name, workflow] of [['sync.yml', syncWorkflow], ['deploy.yml', deplo
   assert(uses.every((ref) => /@[0-9a-f]{40}$/.test(ref)), `${name} 存在未固定到完整 SHA 的 Action`);
 }
 
+/* 可核对性：首页/关于本站/页脚都要给出公开仓库入口（否则“改动可查”只是口头承诺）。 */
+assert(html.includes('https://github.com/du3162417185-wq/bitget-journal'), 'index.html 缺少公开仓库链接');
+assert(html.includes('commits/main'), 'index.html 缺少提交历史链接');
+
 const testReviews = Object.values(reviews).filter((review) => /【?测试\d*】?/i.test(review.text));
 assert(testReviews.length === 0, `仍有 ${testReviews.length} 条测试复盘，请上线前清理`);
 
