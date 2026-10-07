@@ -86,7 +86,7 @@ const june3Daily = Number(data.stats.daily.find((d) => d.d === '2026-06-03')?.pn
 assert(june3ClosePnl > 300 && june3ClosePnl < 400, `6月3日逐笔平仓毛盈亏异常：${june3ClosePnl}`);
 assert(june3Daily > 300 && june3Daily < 400, `6月3日每日逐笔净盈亏仍疑似整仓归集：${june3Daily}`);
 
-for (const id of ['cards', 'curveChart', 'dailyChart', 'recentCloses', 'closesTable', 'reviewModal', 'rvSym', 'rvMeta', 'rvBody']) {
+for (const id of ['cards', 'curveChart', 'dailyChart', 'recentCloses', 'overviewPositions', 'ovPosEmpty', 'closesTable', 'reviewModal', 'rvSym', 'rvMeta', 'rvBody']) {
   assert(html.includes(`id="${id}"`), `index.html 缺少 #${id}`);
 }
 for (const token of ['data/reviews.json', 'data/version.json', 'renderCharts()', 'renderRecentCloses()', 'bindReviewModal()', 'setInterval(checkForUpdate, 60 * 1000)']) {

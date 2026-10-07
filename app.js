@@ -298,11 +298,9 @@ function renderRecentCloses() {
 }
 
 /* ---------- 当前持仓 ---------- */
-function renderPositions() {
+/* 同一张表同时用于总览首屏与「当前持仓」页，避免两处列定义漂移。 */
+function positionsTableHTML(ps) {
   const d = state.data;
-  const ps = d.positions || [];
-  $('#posCount').textContent = ps.length ? `(${ps.length})` : '';
-  $('#posEmpty').hidden = ps.length > 0;
   const head = `<thead><tr><th>币种</th><th>方向</th><th>杠杆</th><th>数量</th><th>开仓均价</th><th>标记价</th><th>保证金</th><th>浮动盈亏</th><th>收益率</th><th>本仓已实现</th><th>强平价</th><th>开仓时间</th></tr></thead>`;
   const rows = ps.map((p) => {
     const mark = p.markPrice ?? d.tickers?.[p.symbol]?.lastPr;
@@ -321,7 +319,23 @@ function renderPositions() {
       <td class="dim">${t(p.createdTime)}</td>
     </tr>`;
   }).join('');
-  $('#positionsTable').innerHTML = head + `<tbody>${rows}</tbody>`;
+  return head + `<tbody>${rows}</tbody>`;
+}
+
+/* 总览首屏的持仓卡：无仓时收起表格、显示空仓提示。 */
+function renderOverviewPositions() {
+  const ps = state.data.positions || [];
+  $('#ovPosCount').textContent = ps.length ? `(${ps.length})` : '';
+  $('#ovPosEmpty').hidden = ps.length > 0;
+  $('#overviewPositions').innerHTML = ps.length ? positionsTableHTML(ps) : '';
+}
+
+function renderPositions() {
+  const d = state.data;
+  const ps = d.positions || [];
+  $('#posCount').textContent = ps.length ? `(${ps.length})` : '';
+  $('#posEmpty').hidden = ps.length > 0;
+  $('#positionsTable').innerHTML = positionsTableHTML(ps);
 
   const oos = d.openOrders || [];
   $('#ooCount').textContent = oos.length ? `(${oos.length})` : '';
@@ -511,6 +525,7 @@ function renderAll() {
   const d = state.data;
   $('#syncTime').textContent = new Date(d.meta.generatedAtMs).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', ...TZ, hour: '2-digit', minute: '2-digit' });
   renderOverview();
+  renderOverviewPositions();
   renderCharts();
   renderRecentCloses();
   renderPositions();
