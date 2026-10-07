@@ -279,24 +279,6 @@ function bindReviewModal() {
 const rvBadge = (p) => state.reviews[rvKey(p)]
   ? `<button class="rv-btn" data-rv="${esc(rvKey(p))}" title="查看作者复盘">📝</button>` : '<span class="dim">–</span>';
 
-/* ---------- 总览·最近平仓（含开仓时间 + 复盘） ---------- */
-function renderRecentCloses() {
-  const head = `<thead><tr><th>平仓时间</th><th>开仓时间</th><th>币种</th><th>方向</th><th>数量</th><th>开仓均价</th><th>平仓均价</th><th>净盈亏(USDT)</th><th>复盘</th></tr></thead>`;
-  const rows = state.closes.slice(0, 10).map((p) => `
-    <tr>
-      <td>${t(p.updatedTime)}</td>
-      <td class="dim">${t(p.createdTime)}</td>
-      <td><b>${esc(sym(p.symbol))}</b><span class="tag">${p.category === 'SPOT' ? '现货' : '合约'}</span></td>
-      <td class="${p.posSide === 'long' ? 'pos' : 'neg'}">${SIDE[p.posSide] || '–'}</td>
-      <td class="num">${fmt(p.closeTotalPos, 3)}</td>
-      <td class="num">${p.openPriceAvg ? fmt(p.openPriceAvg, p.openPriceAvg > 100 ? 2 : 4) : '–'}</td>
-      <td class="num">${fmt(p.closePriceAvg, p.closePriceAvg > 100 ? 2 : 4)}</td>
-      <td class="num ${cls(p.netProfit)}">${pnl(p.netProfit)}</td>
-      <td>${rvBadge(p)}</td>
-    </tr>`).join('');
-  $('#recentCloses').innerHTML = head + `<tbody>${rows || '<tr><td colspan="9" class="empty">暂无平仓记录</td></tr>'}</tbody>`;
-}
-
 /* ---------- 当前持仓 ---------- */
 /* 同一张表同时用于总览首屏与「当前持仓」页，避免两处列定义漂移。 */
 function positionsTableHTML(ps) {
@@ -527,7 +509,6 @@ function renderAll() {
   renderOverview();
   renderOverviewPositions();
   renderCharts();
-  renderRecentCloses();
   renderPositions();
   renderCloses();
   renderFills();

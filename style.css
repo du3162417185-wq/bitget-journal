@@ -75,6 +75,9 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: .5px; }
 
 /* ---------- 表格 ---------- */
 .table-wrap { overflow-x: auto; }
+/* 首页整仓平仓记录：长表在卡片内滚动，表头在容器内吸顶（覆盖全局 top:47px 的页面级偏移）。 */
+.table-wrap.tall { max-height: 62vh; overflow-y: auto; }
+.table-wrap.tall th { top: 0; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { padding: 9px 10px; text-align: right; white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }

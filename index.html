@@ -30,7 +30,6 @@
   <div class="wrap">
     <button data-tab="overview" class="active">总览</button>
     <button data-tab="positions">当前持仓</button>
-    <button data-tab="closes">平仓历史</button>
     <button data-tab="fills">成交明细</button>
     <button data-tab="orders">历史委托</button>
     <button data-tab="transfers">充提记录</button>
@@ -72,10 +71,12 @@
 
     <div class="card">
       <div class="card-head">
-        <div class="card-title">最近整仓结束记录</div>
-        <a class="more" href="#" data-goto="closes">查看全部整仓记录 →</a>
+        <div class="card-title">整仓平仓记录 <span class="count" id="closesCount"></span>
+          <span class="note">2026年2月起全量留档 · 经典账户记录已导入</span></div>
+        <div class="tools"><input id="closesFilter" class="search" placeholder="筛选币种…">
+        <button class="csv" data-csv="closes">导出 CSV</button></div>
       </div>
-      <div class="table-wrap"><table id="recentCloses"></table></div>
+      <div class="table-wrap tall"><table id="closesTable"></table></div>
     </div>
   </section>
 
@@ -105,19 +106,6 @@
         <div class="card-title">资金账户（现货/理财）</div>
         <div class="table-wrap"><table id="fundingTable"></table></div>
       </div>
-    </div>
-  </section>
-
-  <!-- 平仓历史 -->
-  <section id="tab-closes" class="panel">
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">历史平仓盈亏 <span class="count" id="closesCount"></span>
-          <span class="note">2026年2月起全量留档 · 经典账户记录已导入</span></div>
-        <div class="tools"><input id="closesFilter" class="search" placeholder="筛选币种…">
-        <button class="csv" data-csv="closes">导出 CSV</button></div>
-      </div>
-      <div class="table-wrap"><table id="closesTable"></table></div>
     </div>
   </section>
 
@@ -178,9 +166,9 @@
       <ul>
         <li>历史范围：<b>2026 年 2 月至今全量记录</b>——2026 年 8 月前为经典账户，由 Bitget 官方导出文件导入；此后由 API 自动同步并<b>永久归档</b>（API 仅返回近 90 天，但本站归档不会丢失任何老记录）；</li>
         <li>同步频率：<b>每 5 分钟快速刷新</b>（Cloudflare 定时触发），<b>每小时把完整快照归档一次</b>到 GitHub；GitHub 自带的 20 分钟计划任务作为独立兜底；</li>
-        <li>平仓历史中的「导入」「归集」标记：导入 = 经典账户导出文件；归集 = 由成交明细中的平仓盈亏自动汇总（两段数据的衔接处）；</li>
+        <li>首页「整仓平仓记录」中的「导入」「归集」标记：导入 = 经典账户导出文件；归集 = 由成交明细中的平仓盈亏自动汇总（两段数据的衔接处）；</li>
         <li><b>总览时间统计按每次实际平仓/减仓成交入账</b>：平仓盈亏记在成交当天，全部合约成交手续费记在成交当天，资金费记在实际收支当天；不再等整个仓位完全清空后一次性归到最后一天；</li>
-        <li>「平仓历史」仍是交易所的整仓生命周期记录，适合看一整个仓位最终结果；「成交明细」可逐笔核对每次平仓成交的盈亏；</li>
+        <li>首页「整仓平仓记录」是交易所的整仓生命周期记录，适合看一整个仓位最终结果；「成交明细」可逐笔核对每次平仓成交的盈亏；</li>
         <li>逐笔净盈亏 = 平仓成交盈亏 − 合约成交手续费 ± 资金费。资金流水 API 仅能回溯近 90 天，更早部分按官方历史仓位的结清日补录；</li>
         <li>交易品种覆盖 <b>USDT 本位与 USDC 本位合约</b>（如 BTCUSDT、BTCPERP、ETHPERP）及现货，COIN-FUTURES 币本位账户无持仓；</li>
         <li>网络容错：数据主源为本站（GitHub Pages），加载失败会自动改用 jsDelivr 镜像（内容取自同一公开仓库的归档，最多滞后约 1 小时）并自动重试；</li>
