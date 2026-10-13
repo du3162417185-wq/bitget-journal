@@ -363,10 +363,18 @@ async function main() {
   log('API：平仓', apiHistPos.length, '· 成交', apiFills.length + apiSpotFills.length, '· 委托', apiOrders.length, '· 资金费流水', apiFinancialRecords.length);
 
   /* ---------- 归档合并（先归集缺口，再三方合并） ---------- */
-  const mergedFills = mergeFills(prev?.fills || [], imp.fills, [...apiFills, ...apiSpotFills]);
-  const basePositions = mergePositions(prev?.historyPositions || [], imp.positions, apiHistPos);
-  const gapSynth = synthesizeGapPositions(mergedFills, basePositions);
-  data.historyPositions = mergePositions(basePositions, gapSynth);
+  /* 6-05~7-31 的历史成交在旧同步里丢了逐笔盈亏（execPnl=0），由 2026-07-31 官方导出
+   * 重建补齐（逐笔盈亏已用整仓盈亏验证到分位）。放最后合并：同键以补丁值为准，
+   * 覆盖任何来源里 execPnl 仍为 0 的旧副本。 */
+  const recoveredFills = readJson('fills-pnl-recovered.json', []);
+  const mergedFills = mergeFills(prev?.fills || [], imp.fills, [...apiFills, ...apiSpotFills], recoveredFills);
+  /* 归集行只补"没有任何整仓记录覆盖"的缺口：与已知整仓生命重叠的片段
+   * （如 MSFT/NVDA 的减仓片段，盈亏已含在 7 月整仓行内）不再作为整仓展示，避免重复计数。 */
+  const realPositions = mergePositions(imp.positions, apiHistPos, (prev?.historyPositions || []).filter((p) => p.importSource !== 'gap-synth'));
+  const overlapsKnown = (g) => realPositions.some((p) => p.symbol === g.symbol && (p.posSide || '') === (g.posSide || '')
+    && Number(p.updatedTime) >= Number(g.createdTime) - 60000 && Number(g.updatedTime) >= Number(p.createdTime) - 60000);
+  const gapSynth = synthesizeGapPositions(mergedFills, realPositions).filter((g) => !overlapsKnown(g));
+  data.historyPositions = mergePositions(realPositions, gapSynth);
   const transferMap = new Map();
   for (const x of [...(imp.transfers || []), ...(prev?.transfers || []), ...apiTransfers]) transferMap.set(transferKey(x), x);
   data.transfers = [...transferMap.values()];
