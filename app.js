@@ -124,7 +124,7 @@ function renderOverview() {
   const cards = [
     { k: '账户总权益（USDT）', v: fmt(eq), hint: c ? `≈ ¥${fmt(c, 0)} · 1U≈7.2¥估算` : '', hi: true },
     { k: '未实现盈亏', v: pnl(stats.unrealisedPnl ?? NaN), cls: cls(stats.unrealisedPnl), hint: '当前持仓浮动' },
-    { k: '逐笔净已实现盈亏', v: pnl(cs.net), cls: cls(cs.net), hint: `${rangeLabel} ${cs.count} 次平/减仓成交 · 按发生日计`,
+    { k: '逐笔净已实现盈亏', v: pnl(cs.net), cls: cls(cs.net), hint: `${rangeLabel} ${cs.count} 次合约平/减仓成交 · 按发生日计（含现货卖出）`,
       select: `<select id="cardRange" class="range-select">${RANGES.map(([v, l]) => `<option value="${v}" ${v === state.cardRange ? 'selected' : ''}>${l}</option>`).join('')}</select>` },
     { k: '胜率', v: stats.winRate == null ? '–' : stats.winRate + '%', hint: '按整仓结束后的净盈亏计（全程）' },
     { k: '累计手续费', v: fmt(stats.fees), hint: '全部留档成交（USDT/USDC 计价）' },

@@ -28,6 +28,16 @@ assert(Array.isArray(data.stats?.daily), 'data.json 缺少 stats.daily');
 assert(Array.isArray(data.stats?.events), 'data.json 缺少 stats.events');
 assert(data.stats?.accounting?.method === 'fill-exec-pnl', '统计尚未切换到逐笔成交口径');
 assert(Array.isArray(data.financialRecords), 'data.json 缺少 financialRecords');
+assert(Array.isArray(data.spotTrades), 'data.json 缺少 spotTrades（现货账本）');
+{
+  const spotKeys = new Set();
+  for (const t of data.spotTrades) {
+    assert(t.sym && Number.isFinite(Number(t.ts)) && Number.isFinite(Number(t.sh)) && Number.isFinite(Number(t.px)), `现货成交字段不完整：${JSON.stringify(t)}`);
+    const key = `${t.cat}|${t.ts}|${t.sym}`;
+    assert(!spotKeys.has(key), `现货成交重复：${key}`);
+    spotKeys.add(key);
+  }
+}
 /* 隐私边界：/account/settings 含账户 uid，公开归档里不得出现。
  * 检查用结构性字段名而非 uid 字面量（本文件在公开仓库里，不能泄露 uid）；
  * 如需字面量核对，通过环境变量 PRIVATE_ACCOUNT_UID 传入。 */

@@ -264,6 +264,7 @@ async function main() {
     orders: [],
     financialRecords: [],
     transfers: imp.transfers || [],
+    spotTrades: [],
     tickers: {},
     stats: {},
     equityHistory: [],
@@ -387,6 +388,84 @@ async function main() {
   if (financialCoverageStart) data.meta.financialRecordsFrom = financialCoverageStart;
   log('合并后：平仓', data.historyPositions.length, `（含导入 ${imp.positions.length}、归集 ${gapSynth.length}）· 成交`, data.fills.length, '· 委托', data.orders.length, '· 充提', data.transfers.length, `（API 新增 ${apiTransfers.length}）`);
 
+  /* ---------- 现货（代币化股票等）账本：MARGIN + SPOT 合并 FIFO ----------
+   * 现货成交在 financial-records 里是两腿（同 账本+秒）：股份腿 + 计价腿(USDT/USDC)，
+   * 成交价 = |计价腿/股份腿|，计价腿已含手续费（买入多付、卖出少收）。
+   * MARGIN 与 SPOT 是两个子账本且互转不出现在流水中，必须合并后按时间做 FIFO。
+   * 接口只回溯约 90 天，故归档长期保留；每次运行用 归档+新抓 全量重算，
+   * 并用"FIFO 余量 == 账户持仓"做完整性证明。 */
+  const pullSpotLedger = async (cat) => {
+    const out = [];
+    let end = Date.now();
+    const floor = end - 90 * DAY;
+    while (end > floor) {
+      const start = Math.max(floor, end - 29 * DAY + 1);
+      try {
+        out.push(...await getAll('/api/v3/account/financial-records', { category: cat, startTime: String(start), endTime: String(end) }));
+      } catch (e) { errors.push(`spotLedger[${cat}]: ` + e.message); }
+      end = start - 1;
+      if (end > floor) await sleep(150);
+    }
+    return out;
+  };
+  const spotTradeKey = (x) => `${x.cat}|${x.ts}|${x.sym}`;
+  const freshSpot = new Map();
+  for (const cat of ['MARGIN', 'SPOT']) {
+    for (const r of await pullSpotLedger(cat)) {
+      const sym = String(r.symbol || '').toUpperCase();
+      if (!sym) continue;
+      const key = spotTradeKey({ cat, ts: Number(r.ts), sym });
+      const t = freshSpot.get(key) || { cat, ts: Number(r.ts), sym, sh: 0, cash: 0 };
+      if (['USDT', 'USDC'].includes(String(r.coin || '').toUpperCase())) t.cash += Number(r.amount || 0);
+      else t.sh += Number(r.amount || 0);
+      freshSpot.set(key, t);
+    }
+  }
+  const spotMap = new Map();
+  for (const t of prev?.spotTrades || []) {
+    if (Number(t.sh) && Number.isFinite(Number(t.px))) spotMap.set(spotTradeKey(t), { cat: t.cat, ts: Number(t.ts), sym: t.sym, sh: Number(t.sh), px: Number(t.px) });
+  }
+  for (const t of freshSpot.values()) {
+    if (!Number(t.sh)) continue;
+    spotMap.set(spotTradeKey(t), { cat: t.cat, ts: t.ts, sym: t.sym, sh: t.sh, px: Math.abs(t.cash / t.sh) });
+  }
+  data.spotTrades = [...spotMap.values()].sort((a, b) => a.ts - b.ts)
+    .map((t) => ({ cat: t.cat, ts: t.ts, sym: t.sym, sh: round(t.sh, 8), px: round(t.px, 8) }));
+  log('现货成交（MARGIN+SPOT 合并）:', data.spotTrades.length, '笔');
+
+  /* fills(category=SPOT) 作为补充源：流水只回溯约 90 天，而归档的现货成交更早
+   * （如 7-08 的赠股卖出）。与账本已有记录（同符号同方向 ±5 秒）视为同一笔丢弃，
+   * 同秒同量同向的重复行（大小写变体）只取一条；补充行按 USDT 手续费还原为含费价。 */
+  {
+    const normSym = (s) => String(s || '').toUpperCase();
+    const hasLedgerMatch = (f) => data.spotTrades.some((t) => t.sym === normSym(f.symbol)
+      && t.cat !== 'SPOT-FILLS'
+      && (t.sh > 0 ? 'buy' : 'sell') === f.side
+      && Math.abs(t.ts - Number(f.createdTime)) <= 5000);
+    const seenFill = new Set();
+    const extras = [];
+    for (const f of mergedFills) {
+      if (f.category !== 'SPOT') continue;
+      const sym = normSym(f.symbol);
+      const qty = Number(f.execQty || 0);
+      if (!qty || !['buy', 'sell'].includes(f.side)) continue;
+      const dedupeKey = `${sym}|${f.side}|${Math.floor(Number(f.createdTime) / 1000)}|${qty}`;
+      if (seenFill.has(dedupeKey)) continue;
+      seenFill.add(dedupeKey);
+      if (hasLedgerMatch(f)) continue;
+      const fee = Array.isArray(f.feeDetail)
+        ? f.feeDetail.filter((x) => ['USDT', 'USDC'].includes(x.feeCoin || 'USDT')).reduce((s, x) => s + Number(x.fee || 0), 0)
+        : (['USDT', 'USDC'].includes(f.feeCoin || 'USDT') ? Number(f.fee || 0) : 0);
+      const px = f.side === 'buy' ? Number(f.execPrice || 0) + fee / qty : Number(f.execPrice || 0) - fee / qty;
+      if (!(px > 0)) continue;
+      extras.push({ cat: 'SPOT-FILLS', ts: Number(f.createdTime), sym, sh: f.side === 'buy' ? qty : -qty, px: round(px, 8) });
+    }
+    if (extras.length) {
+      data.spotTrades = [...data.spotTrades, ...extras].sort((a, b) => a.ts - b.ts);
+      log('现货成交补充（fills 归档，早于流水回溯窗口）:', extras.length, '笔');
+    }
+  }
+
   for (const cat of FUT_CATEGORIES) {
     try {
       const tks = toList(await get(`/api/v3/market/tickers?category=${cat}`));
@@ -457,6 +536,69 @@ async function main() {
     }
   }
 
+  /* 现货 FIFO：逐笔卖出实现盈亏按成交时间入账；余量与账户余额对账（完整性证明）。
+   * 成本不明的卖出（无对应买入）默认整仓剔出账本；赠予白名单按零成本计。
+   * 补充源（SPOT-FILLS）若导致对账失败，自动退回仅流水口径。 */
+  const SPOT_GIFT_SYMBOLS = new Set(['RSPCXUSDT']); // 活动赠予（用户确认成本为 0）
+  const spotNotes = [];
+  {
+    const bySym = new Map();
+    for (const t of data.spotTrades) (bySym.get(t.sym) || bySym.set(t.sym, []).get(t.sym)).push(t);
+    const balOf = (sym) => {
+      const coin = sym.replace(/(USDT|USDC)$/i, '').toUpperCase();
+      const a = (data.accountAssets?.assets || []).find((x) => String(x.coin || '').toUpperCase() === coin);
+      return a ? Number(a.equity ?? a.balance ?? 0) : null;
+    };
+    const analyze = (sym, list) => {
+      const inv = []; const symEvents = [];
+      let realized = 0; let giftQty = 0; let unknownQty = 0;
+      for (const t of list) {
+        if (t.sh > 0) { inv.push([t.sh, t.px]); continue; }
+        let q = -t.sh; let r = 0;
+        while (q > 1e-9 && inv.length) {
+          const lot = inv[0];
+          const take = Math.min(lot[0], q);
+          r += (t.px - lot[1]) * take;
+          lot[0] -= take; q -= take;
+          if (lot[0] <= 1e-9) inv.shift();
+        }
+        if (q > 1e-9) {
+          if (SPOT_GIFT_SYMBOLS.has(sym)) { r += t.px * q; giftQty += q; }
+          else unknownQty += q;
+        }
+        realized += r;
+        symEvents.push({ t: t.ts, net: round(r, 8), kind: 'spot' });
+      }
+      const held = inv.reduce((s, l) => s + l[0], 0);
+      const heldCost = inv.reduce((s, l) => s + l[0] * l[1], 0);
+      const bal = balOf(sym);
+      const ok = unknownQty < 1e-9 && (bal === null || Math.abs(held - bal) < 1e-6);
+      return { ok, symEvents, realized, giftQty, unknownQty, held, heldCost, bal };
+    };
+    for (const [sym, all] of bySym) {
+      let res = analyze(sym, all);
+      if (!res.ok) {
+        const ledgerOnly = all.filter((t) => t.cat !== 'SPOT-FILLS');
+        if (ledgerOnly.length !== all.length) {
+          const retry = analyze(sym, ledgerOnly);
+          if (retry.ok) { spotNotes.push(`${sym}: 补充源未通过对账，已退回仅流水口径`); res = retry; }
+        }
+      }
+      if (!res.ok) {
+        const reason = res.unknownQty > 1e-9
+          ? `有 ${round(res.unknownQty, 6)} 股卖出无对应买入记录（超出接口 90 天回溯或赠予），成本不可核实`
+          : `FIFO 余量 ${round(res.held, 8)} 与账户余额 ${res.bal} 不一致，成本不可信`;
+        errors.push(`spot[${sym}]: ${reason}，已整仓剔出账本`);
+        spotNotes.push(`${sym}: ${reason}，未计入盈亏（如需计入请提供现货成交导出）`);
+        continue;
+      }
+      if (res.giftQty > 1e-9) spotNotes.push(`${sym}: ${round(res.giftQty, 6)} 股为活动赠予（按零成本计）`);
+      events.push(...res.symEvents);
+      log(`现货 ${sym}: 已实现 ${round(res.realized, 2)} · 剩余 ${round(res.held, 6)} 股${res.held > 0 ? ` @ ${round(res.heldCost / res.held, 4)}` : ''}${res.bal !== null ? ' ✓ 与账户余额一致' : ''}`);
+    }
+  }
+  spotNotes.forEach((n) => log('现货备注:', n));
+
   events.sort((a, b) => a.t - b.t);
   let cum = 0;
   const curve = events.map((e) => { cum += e.net; return { t: e.t, cum: round(cum, 2) }; });
@@ -505,6 +647,12 @@ async function main() {
       fillFrom: Number.isFinite(firstFillAt) ? firstFillAt : null,
       financialRecordsFrom: Number.isFinite(fundingFrom) ? fundingFrom : null,
       note: '平仓盈亏按每次成交日计；合约成交手续费按成交日扣；资金费按实际流水日计，90天以前无流水的部分按历史仓位结清日补录。',
+      spot: {
+        method: 'fifo',
+        ledgers: 'MARGIN+SPOT',
+        note: '现货（含代币化股票）卖出已实现盈亏按 FIFO 计入逐笔账本，成交价已含手续费；成本以 MARGIN+SPOT 双账本重建并与账户持仓数量对账。',
+        notes: spotNotes,
+      },
     },
   };
   data.meta.errors = errors;
