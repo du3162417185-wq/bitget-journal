@@ -22,6 +22,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const nl2br = (s) => esc(s).replace(/\r?\n/g, '<br>');
 
 const SIDE = { long: '多', short: '空' };
+/* 多空着色：有 tradeSide 时按 多/空 着色（与持仓表一致），缺失时退回买卖方向。 */
+const sideCls = (o) => {
+  const ts = String(o.tradeSide || '');
+  if (ts.includes('long')) return 'pos';
+  if (ts.includes('short')) return 'neg';
+  return (o.side === 'buy' || ts.includes('open')) ? 'pos' : 'neg';
+};
 const TRADE_SIDE = { open_long: '开多', close_long: '平多', open_short: '开空', close_short: '平空', buy: '买入', sell: '卖出' };
 const ORDER_STATUS = { filled: '已成交', canceled: '已撤销', cancelled: '已撤销', new: '待成交', partial: '部分成交', live: '待成交' };
 const RANGES = [['30', '近30天'], ['60', '近60天'], ['90', '近90天'], ['all', '交易至今']];
@@ -92,7 +99,7 @@ async function checkForUpdate() {
 function prepare() {
   const d = state.data;
   state.closes = [...(d.historyPositions || [])].sort((a, b) => Number(b.updatedTime) - Number(a.updatedTime));
-  const fills = [...(d.fills || []), ...(d.spotFills || [])];
+  const fills = [...(d.fills || [])];
   state.fills = fills.sort((a, b) => Number(b.createdTime) - Number(a.createdTime));
   state.orders = [...(d.orders || [])].sort((a, b) => Number(b.createdTime) - Number(a.createdTime));
 }
@@ -106,7 +113,7 @@ function closeStats(days) {
     const list = events.filter((e) => inRange(e.t, days));
     return {
       net: list.reduce((s, e) => s + Number(e.net || 0), 0),
-      count: list.filter((e) => e.kind === 'close' || e.kind === 'legacy-close').length,
+      count: list.filter((e) => e.kind === 'close' || e.kind === 'legacy-close' || e.kind === 'spot').length,
     };
   }
   /* 兼容尚未完成下一次同步的旧数据。 */
@@ -124,7 +131,7 @@ function renderOverview() {
   const cards = [
     { k: '账户总权益（USDT）', v: fmt(eq), hint: c ? `≈ ¥${fmt(c, 0)} · 1U≈7.2¥估算` : '', hi: true },
     { k: '未实现盈亏', v: pnl(stats.unrealisedPnl ?? NaN), cls: cls(stats.unrealisedPnl), hint: '当前持仓浮动' },
-    { k: '逐笔净已实现盈亏', v: pnl(cs.net), cls: cls(cs.net), hint: `${rangeLabel} ${cs.count} 次合约平/减仓成交 · 按发生日计（含现货卖出）`,
+    { k: '逐笔净已实现盈亏', v: pnl(cs.net), cls: cls(cs.net), hint: `${rangeLabel} ${cs.count} 次平/减仓（合约+现货卖出） · 按发生日计`,
       select: `<select id="cardRange" class="range-select">${RANGES.map(([v, l]) => `<option value="${v}" ${v === state.cardRange ? 'selected' : ''}>${l}</option>`).join('')}</select>` },
     { k: '胜率', v: stats.winRate == null ? '–' : stats.winRate + '%', hint: '按整仓结束后的净盈亏计（全程）' },
     { k: '累计手续费', v: fmt(stats.fees), hint: '全部留档成交（USDT/USDC 计价）' },
@@ -403,7 +410,7 @@ function renderFills() {
       <td>${t(f.createdTime)}</td>
       <td><b>${esc(spot ? f.symbol : sym(f.symbol))}</b>${spot ? '<span class="tag spot">现货</span>' : ''}</td>
       <td class="dim">${esc(f.orderType)}</td>
-      <td class="${(f.side === 'buy' || String(f.tradeSide).includes('open')) ? 'pos' : 'neg'}">${TRADE_SIDE[f.tradeSide] || TRADE_SIDE[f.side] || esc(f.side)}</td>
+      <td class="${sideCls(f)}">${TRADE_SIDE[f.tradeSide] || TRADE_SIDE[f.side] || esc(f.side)}</td>
       <td class="num">${fmt(f.execPrice, f.execPrice > 100 ? 2 : 4)}</td>
       <td class="num">${fmt(f.execQty, 4)}</td>
       <td class="num dim">${fmt(f.execValue)}</td>
@@ -423,7 +430,7 @@ function renderOrders() {
   const rows = list.map((o) => `<tr>
     <td>${t(o.createdTime)}</td>
     <td><b>${esc(sym(o.symbol))}</b></td>
-    <td class="${(o.side === 'buy' || String(o.tradeSide).includes('open')) ? 'pos' : 'neg'}">${o.posSide && SIDE[o.posSide] ? `${TRADE_SIDE[o.tradeSide] || (o.side === 'buy' ? '买' : '卖')}` : (o.side === 'buy' ? '买入' : '卖出')}</td>
+    <td class="${sideCls(o)}">${o.posSide && SIDE[o.posSide] ? `${TRADE_SIDE[o.tradeSide] || (o.side === 'buy' ? '买' : '卖')}` : (o.side === 'buy' ? '买入' : '卖出')}</td>
     <td class="dim">${esc(o.orderType)}${o.timeInForce === 'post_only' ? '·PO' : ''}</td>
     <td class="num">${Number(o.price) > 0 ? fmt(o.price, o.price > 100 ? 2 : 4) : '市价'}</td>
     <td class="num">${fmt(o.qty, 4)}</td>
@@ -488,10 +495,11 @@ function exportCSV(kind) {
     rows = [['时间', '类型', '账户', '币种', '数量', '状态', '交易ID']]
       .concat((state.data.transfers || []).map((x) => [tFull(x.time), x.type, x.account, x.coin, x.amount, x.status, x.txid]));
   }
-  /* 单元格转义：先中和 Excel/WPS 公式注入（= + - @ 开头），再按 CSV 规则加引号。 */
+  /* 单元格转义：先中和 Excel/WPS 公式注入（= + - @ 开头），再按 CSV 规则加引号。
+   * 纯数字（含负数，如 -15.20）不加前缀，避免被表格软件当成文本。 */
   const csvCell = (c) => {
     let s = String(c ?? '');
-    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    if (/^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s)) s = `'${s}`;
     return `"${s.replace(/"/g, '""')}"`;
   };
   const csv = '\ufeff' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');

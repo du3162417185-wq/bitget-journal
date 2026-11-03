@@ -16,14 +16,16 @@ import { spawn } from 'node:child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 8931;
-const PROXY = 'http://127.0.0.1:7897';
+/* 代理可用环境变量覆盖（本机 7897 曾整体失效，改用 10808 时无需改代码）；
+ * 设为空字符串（HTTPS_PROXY=）可强制直连。 */
+const PROXY = process.env.HTTPS_PROXY ?? process.env.BITGET_PROXY ?? 'http://127.0.0.1:7897';
 const MAX_REVIEW_LENGTH = 5000;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
 };
 
-const GIT_CONFIG = ['-c', `http.proxy=${PROXY}`, '-c', `https.proxy=${PROXY}`];
+const GIT_CONFIG = PROXY ? ['-c', `http.proxy=${PROXY}`, '-c', `https.proxy=${PROXY}`] : [];
 const git = (args, options = {}) => execFileSync('git', [...GIT_CONFIG, ...args], {
   cwd: ROOT,
   encoding: 'utf8',
@@ -117,7 +119,21 @@ function saveReview({ key, text, symbol }) {
   const cleanText = text.trim();
   const before = reviews[key]?.text || '';
 
-  if (cleanText === before) return syncInfo('内容没有变化，无需提交');
+  if (cleanText === before) {
+    /* 上次保存可能"已提交但推送失败"（代理/网络问题）。此时内容没变，
+     * 但本地 branch 领先远端——必须补推一次，否则这条复盘会永远卡在本地。 */
+    let ahead = 0;
+    try { ahead = Number(git(['rev-list', '--count', 'origin/main..HEAD']).trim()) || 0; } catch { ahead = 0; }
+    if (ahead > 0) {
+      try {
+        git(['push', 'origin', 'HEAD:main']);
+      } catch (error) {
+        throw new Error(`复盘已在本地提交，但 GitHub 推送仍失败：${errorText(error)}`);
+      }
+      return syncInfo('已补推上次未上传的复盘');
+    }
+    return syncInfo('内容没有变化，无需提交');
+  }
 
   if (cleanText) {
     reviews[key] = { text: cleanText, time: Date.now(), symbol: symbol || position.symbol };
@@ -183,8 +199,9 @@ function readBody(req) {
   });
 }
 
-/* git 操作会阻塞事件循环，用互斥锁避免本机并发请求把服务卡住。 */
-let saveInFlight = false;
+/* git 操作会阻塞事件循环，用互斥锁避免本机并发请求把服务卡住。
+ * save 与 refresh 都会执行 pull/commit/push，必须共用同一把锁，否则会撞 .git/index.lock。 */
+let gitBusy = false;
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -195,17 +212,23 @@ const server = http.createServer(async (req, res) => {
 
     try {
       if (url.pathname === '/api/refresh') {
-        json(res, 200, refreshFromRemote());
+        if (gitBusy) { json(res, 429, { ok: false, message: '上一个 Git 操作仍在进行，请稍候重试' }); return; }
+        gitBusy = true;
+        try {
+          json(res, 200, refreshFromRemote());
+        } finally {
+          gitBusy = false;
+        }
         return;
       }
       if (url.pathname === '/api/save') {
-        if (saveInFlight) { json(res, 429, { ok: false, message: '上一个保存仍在进行，请稍候重试' }); return; }
+        if (gitBusy) { json(res, 429, { ok: false, message: '上一个保存仍在进行，请稍候重试' }); return; }
         const body = JSON.parse(await readBody(req));
-        saveInFlight = true;
+        gitBusy = true;
         try {
           json(res, 200, saveReview(body));
         } finally {
-          saveInFlight = false;
+          gitBusy = false;
         }
         return;
       }

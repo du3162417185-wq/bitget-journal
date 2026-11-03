@@ -33,7 +33,7 @@ assert(Array.isArray(data.spotTrades), 'data.json 缺少 spotTrades（现货账�
   const spotKeys = new Set();
   for (const t of data.spotTrades) {
     assert(t.sym && Number.isFinite(Number(t.ts)) && Number.isFinite(Number(t.sh)) && Number.isFinite(Number(t.px)), `现货成交字段不完整：${JSON.stringify(t)}`);
-    const key = `${t.cat}|${t.ts}|${t.sym}`;
+    const key = `${t.cat}|${t.ts}|${t.sym}|${t.sh}|${t.px}`;
     assert(!spotKeys.has(key), `现货成交重复：${key}`);
     spotKeys.add(key);
   }

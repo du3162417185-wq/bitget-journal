@@ -429,8 +429,20 @@ async function main() {
     if (!Number(t.sh)) continue;
     spotMap.set(spotTradeKey(t), { cat: t.cat, ts: t.ts, sym: t.sym, sh: t.sh, px: Math.abs(t.cash / t.sh) });
   }
-  data.spotTrades = [...spotMap.values()].sort((a, b) => a.ts - b.ts)
-    .map((t) => ({ cat: t.cat, ts: t.ts, sym: t.sym, sh: round(t.sh, 8), px: round(t.px, 8) }));
+  /* 归档自愈：历史上 SPOT-FILLS 补充行每轮被重复追加，这里按内容去重一次，
+   * 保证已有重复的 data.json 在下一轮同步自动修好（幂等）。 */
+  {
+    const seenSpot = new Set();
+    data.spotTrades = [...spotMap.values()]
+      .map((t) => ({ cat: t.cat, ts: t.ts, sym: t.sym, sh: round(t.sh, 8), px: round(t.px, 8) }))
+      .sort((a, b) => a.ts - b.ts)
+      .filter((t) => {
+        const k = `${t.cat}|${t.ts}|${t.sym}|${t.sh}|${t.px}`;
+        if (seenSpot.has(k)) return false;
+        seenSpot.add(k);
+        return true;
+      });
+  }
   log('现货成交（MARGIN+SPOT 合并）:', data.spotTrades.length, '笔');
 
   /* fills(category=SPOT) 作为补充源：流水只回溯约 90 天，而归档的现货成交更早
@@ -438,8 +450,9 @@ async function main() {
    * 同秒同量同向的重复行（大小写变体）只取一条；补充行按 USDT 手续费还原为含费价。 */
   {
     const normSym = (s) => String(s || '').toUpperCase();
+    /* 与"任何来源"（含上一轮补进来的 SPOT-FILLS）同符号同方向 ±5 秒视为同一笔，
+     * 否则补充行会在每轮同步里被重复追加。 */
     const hasLedgerMatch = (f) => data.spotTrades.some((t) => t.sym === normSym(f.symbol)
-      && t.cat !== 'SPOT-FILLS'
       && (t.sh > 0 ? 'buy' : 'sell') === f.side
       && Math.abs(t.ts - Number(f.createdTime)) <= 5000);
     const seenFill = new Set();

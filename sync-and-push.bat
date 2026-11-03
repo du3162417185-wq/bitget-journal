@@ -2,10 +2,11 @@
 chcp 65001 >nul
 cd /d %~dp0
 
-REM .env 由 PowerShell 逐行解析：.bat 的 for/set 会把值里的 & 和 | 当成命令分隔符执行，
-REM 用 PowerShell 解析再在同一进程里设置变量，特殊字符不会被当成命令。
+REM .env 由 scripts/fetch.mjs 自己逐行读取（不经 shell），值里的 & | 等特殊字符不会被当作命令分隔符，
+REM 因此这里不再用 PowerShell 预解析（那段内联命令的 \" 转义在 cmd 里脆弱，已移除）。
+REM 若要临时改用其他代理端口：set BITGET_PROXY=http://127.0.0.1:10808 后再运行本脚本。
 if not exist ".env" (echo 未找到 .env 配置 & exit /b 1)
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$envFile = Join-Path $PWD '.env'; foreach ($line in [IO.File]::ReadAllLines($envFile)) { $s = $line.Trim(); if ($s -eq '' -or $s.StartsWith('#')) { continue }; $i = $s.IndexOf('='); if ($i -lt 1) { continue }; $k = $s.Substring(0, $i).Trim(); $v = $s.Substring($i + 1).Trim().Trim('\"'); if ($v) { [Environment]::SetEnvironmentVariable($k, $v, 'Process') } }; npm --silent run sync; exit $LASTEXITCODE"
+npm --silent run sync
 if %errorlevel% neq 0 (echo 同步失败 & exit /b 1)
 
 git add data
